@@ -5,5 +5,4 @@ yfinance
 pandas
 plotly 
 ipywidgets
-pypfopt 
 numpy
