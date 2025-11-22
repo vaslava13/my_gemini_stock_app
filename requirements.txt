@@ -6,5 +6,4 @@ pandas
 plotly 
 ipywidgets
 pypfopt 
-matplotlib.pyplot 
 numpy
