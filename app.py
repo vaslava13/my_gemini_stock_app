@@ -176,11 +176,11 @@ def print_portfolio_details(name, data, total_value, latest_prices, current_hold
 
 if __name__ == '__main__':
     # --- User Input ---
-    portfolio_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'SLF', 'ENB', 'BEPC', 'LAZR', 'BIPC', 'PYPL', 'TDB3087']
+    portfolio_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'SLF', 'ENB', 'BEPC', 'LAZR', 'BIPC', 'PYPL']
 
     current_holdings = {
         'AAPL': 15, 'MSFT': 20, 'GOOGL': 30, 'AMZN': 5, 'NVDA': 48,
-        'SLF': 95, 'ENB': 47, 'LAZR': 1, 'BEPC': 15, 'BIPC': 12, 'PYPL': 5, 'TDB3087': 1
+        'SLF': 95, 'ENB': 47, 'LAZR': 1, 'BEPC': 15, 'BIPC': 12, 'PYPL': 5
     }
     start = '2023-01-01' # Using a longer start date for more robust historical data
 
@@ -202,5 +202,6 @@ if __name__ == '__main__':
         print("Disclaimer:")
         print("The 'Theoretical 1-Year Price Target' is not financial advice or a price prediction. It is calculated by applying the portfolio's overall expected annual return to the stock's current price. This is based on historical data and assumes past performance will continue, which is not guaranteed.")
         print("="*50)
+
 
     print("\nOptimization complete.")
