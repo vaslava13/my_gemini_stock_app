@@ -285,54 +285,49 @@ if __name__ == '__main__':
     print("\nOptimization complete.")
 
     # ... (Your existing code where you calculate metrics) ...
-
+   
     st.divider()
     st.header("🎯 Portfolio Optimization Results")
 
-    # Create 3 Tabs for the different strategies
-    tab1, tab2, tab3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
+    if portfolios:
+        # 1. Create the tabs
+        tab1, tab2, tab3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
 
-    # --- EXAMPLE OF HOW TO CALL THIS FUNCTION IN YOUR LOOP ---
-    
-    # You likely have a loop or sequence where you calculate these. 
-    # You need to gather the data into a list instead of printing it directly.
-    
-    # Example Data Structure construction (Adapt this inside your logic):
-    # For "Low Risk":
-    low_risk_rebal_list = []
-    # ... inside your rebalancing calculation loop for low risk ...
-    # instead of print(f"Action: Sell {shares}"), do:
-    # low_risk_rebal_list.append({
-    #     "Ticker": ticker,
-    #     "Action": "Sell",
-    #     "Amount": 6.02,
-    #     "Target Price (1Y)": 325.20
-    # })
-    
-    # Then call the display function:
-    display_portfolio_results(
-        tab=tab1,
-        name="Lowest Risk",
-        expected_return=19.78,  # Replace with your variable: e.g., perf[0]*100
-        volatility=13.38,       # Replace with your variable: e.g., perf[1]*100
-        sharpe=1.48,            # Replace with your variable
-        weights={'AAPL': 0.0586, 'ENB': 0.4594}, # Replace with your `cleaned_weights` dictionary
-        rebalancing_data=low_risk_rebal_list
-    )
-    
-    # Repeat for tab2 (Balanced) and tab3 (High Risk) using their specific variables.
+        # 2. Define the mapping between tabs and your portfolio keys
+        # Format: (Tab Object, Dictionary Key, Display Name)
+        scenarios = [
+            (tab1, 'low_risk', "Lowest Risk"),
+            (tab2, 'medium_risk', "Balanced"),
+            (tab3, 'high_risk', "High Risk")
+        ]
 
-       # print_portfolio_details("Lowest Risk", portfolios['low_risk'], total_value, latest_prices, current_holdings)
-        #print_portfolio_details("Medium Risk (Balanced)", portfolios['medium_risk'], total_value, latest_prices, current_holdings)
-        #print_portfolio_details("High Risk", portfolios['high_risk'], total_value, latest_prices, current_holdings)
-
-
-
-
-
-
-
-
-
-
-
+        # 3. Loop through each scenario and display the REAL data
+        for tab, key, name in scenarios:
+            
+            # Get the specific portfolio data
+            portfolio_data = portfolios[key]
+            perf = portfolio_data['performance'] # tuple: (return, volatility, sharpe)
+            weights = portfolio_data['weights']
+            
+            # Calculate the specific rebalancing plan for THIS strategy
+            rebalancing_plan = calculate_rebalancing_plan(
+                weights=weights,
+                latest_prices=latest_prices,
+                current_holdings=current_holdings,
+                total_value=total_value,
+                expected_return=perf[0]
+            )
+            
+            # Send data to the display function
+            # Note: We multiply by 100 to convert decimals (0.19) to percents (19%)
+            display_portfolio_results(
+                tab=tab,
+                name=name,
+                expected_return=perf[0] * 100, 
+                volatility=perf[1] * 100,
+                sharpe=perf[2],
+                weights=weights,
+                rebalancing_data=rebalancing_plan
+            )
+    else:
+        st.error("Optimization failed. Please check your data.")
