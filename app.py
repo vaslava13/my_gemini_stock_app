@@ -275,7 +275,7 @@ if __name__ == '__main__':
     # Then call the display function:
     display_portfolio_results(
         tab=tab1,
-        name="Minimum Volatility",
+        name="Lowest Risk",
         expected_return=19.78,  # Replace with your variable: e.g., perf[0]*100
         volatility=13.38,       # Replace with your variable: e.g., perf[1]*100
         sharpe=1.48,            # Replace with your variable
@@ -284,6 +284,11 @@ if __name__ == '__main__':
     )
     
     # Repeat for tab2 (Balanced) and tab3 (High Risk) using their specific variables.
+
+       # print_portfolio_details("Lowest Risk", portfolios['low_risk'], total_value, latest_prices, current_holdings)
+        #print_portfolio_details("Medium Risk (Balanced)", portfolios['medium_risk'], total_value, latest_prices, current_holdings)
+        #print_portfolio_details("High Risk", portfolios['high_risk'], total_value, latest_prices, current_holdings)
+
 
 
 
