@@ -175,6 +175,46 @@ def print_portfolio_details(name, data, total_value, latest_prices, current_hold
             print(f"    Action: {action} {abs(shares_to_trade):.2f} shares")
         print(f"    Theoretical 1-Year Price Target: ${price_target:,.2f}")
 
+# Helper function to display portfolio data nicely
+def display_portfolio_results(tab, name, expected_return, volatility, sharpe, weights, rebalancing_data):
+    with tab:
+        st.subheader(f"{name} Strategy")
+        
+        # 1. Display Top-Level Metrics in Columns
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Expected Annual Return", f"{expected_return:.2f}%")
+        col2.metric("Annual Volatility (Risk)", f"{volatility:.2f}%")
+        col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
+
+        # 2. Display Weights (Pie Chart or Bar Chart)
+        st.markdown("### 📊 Recommended Allocation")
+        
+        # Convert weights dict to DataFrame for plotting
+        # Filter out 0% weights to make the chart cleaner
+        active_weights = {k: v for k, v in weights.items() if v > 0.0001}
+        df_weights = pd.DataFrame.from_dict(active_weights, orient='index', columns=['Weight'])
+        df_weights['Weight'] = df_weights['Weight'] * 100 # Convert to percentage
+        
+        st.bar_chart(df_weights)
+
+        # 3. Display Rebalancing Logic as a DataFrame (Instead of text list)
+        st.markdown("### 🔄 Rebalancing Action Plan")
+        
+        if rebalancing_data:
+            df_rebal = pd.DataFrame(rebalancing_data)
+            st.dataframe(
+                df_rebal, 
+                use_container_width=True,
+                column_config={
+                    "Ticker": "Ticker",
+                    "Action": "Action",
+                    "Amount": "Shares to Trade",
+                    "Target Price (1Y)": st.column_config.NumberColumn(format="$%.2f")
+                }
+            )
+        else:
+            st.info("No rebalancing required.")
+
 if __name__ == '__main__':
     # --- User Input ---
     portfolio_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'SLF', 'ENB', 'BEPC', 'LAZR', 'BIPC', 'PYPL']
@@ -206,4 +246,50 @@ if __name__ == '__main__':
 
 
     print("\nOptimization complete.")
+
+    # ... (Your existing code where you calculate metrics) ...
+
+    st.divider()
+    st.header("🎯 Portfolio Optimization Results")
+
+    # Create 3 Tabs for the different strategies
+    tab1, tab2, tab3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
+
+    # --- EXAMPLE OF HOW TO CALL THIS FUNCTION IN YOUR LOOP ---
+    
+    # You likely have a loop or sequence where you calculate these. 
+    # You need to gather the data into a list instead of printing it directly.
+    
+    # Example Data Structure construction (Adapt this inside your logic):
+    # For "Low Risk":
+    low_risk_rebal_list = []
+    # ... inside your rebalancing calculation loop for low risk ...
+    # instead of print(f"Action: Sell {shares}"), do:
+    # low_risk_rebal_list.append({
+    #     "Ticker": ticker,
+    #     "Action": "Sell",
+    #     "Amount": 6.02,
+    #     "Target Price (1Y)": 325.20
+    # })
+    
+    # Then call the display function:
+    display_portfolio_results(
+        tab=tab1,
+        name="Minimum Volatility",
+        expected_return=19.78,  # Replace with your variable: e.g., perf[0]*100
+        volatility=13.38,       # Replace with your variable: e.g., perf[1]*100
+        sharpe=1.48,            # Replace with your variable
+        weights={'AAPL': 0.0586, 'ENB': 0.4594}, # Replace with your `cleaned_weights` dictionary
+        rebalancing_data=low_risk_rebal_list
+    )
+    
+    # Repeat for tab2 (Balanced) and tab3 (High Risk) using their specific variables.
+
+
+
+
+
+
+
+
 
