@@ -7,4 +7,3 @@ plotly
 ipywidgets
 numpy
 matplotlib
-
