@@ -215,6 +215,43 @@ def display_portfolio_results(tab, name, expected_return, volatility, sharpe, we
         else:
             st.info("No rebalancing required.")
 
+def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_value, expected_return):
+    """
+    Calculates buy/sell actions and returns them as a list of dictionaries 
+    for the Streamlit DataFrame.
+    """
+    rebal_data = []
+    
+    # Iterate through all tickers for which we have price data
+    for ticker in latest_prices.index:
+        optimal_weight = weights.get(ticker, 0)
+        current_shares = current_holdings.get(ticker, 0)
+        
+        # Calculate values
+        target_value = total_value * optimal_weight
+        current_price = latest_prices.get(ticker, 0)
+        
+        # Avoid division by zero if price is missing
+        if current_price > 0:
+            target_shares = target_value / current_price
+            shares_to_trade = target_shares - current_shares
+            
+            # Theoretical price target logic
+            price_target = current_price * (1 + expected_return)
+            
+            # Only add to list if there is a significant trade needed (e.g., > 0.1 shares)
+            if abs(shares_to_trade) > 0.01:
+                action = "Buy" if shares_to_trade > 0 else "Sell"
+                rebal_data.append({
+                    "Ticker": ticker,
+                    "Action": action,
+                    "Shares to Trade": float(f"{abs(shares_to_trade):.2f}"), # Format for clean display
+                    "Target Price (1Y)": float(f"{price_target:.2f}")
+                })
+                
+    return rebal_data
+    
+
 if __name__ == '__main__':
     # --- User Input ---
     portfolio_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'SLF', 'ENB', 'BEPC', 'LAZR', 'BIPC', 'PYPL']
@@ -288,6 +325,7 @@ if __name__ == '__main__':
        # print_portfolio_details("Lowest Risk", portfolios['low_risk'], total_value, latest_prices, current_holdings)
         #print_portfolio_details("Medium Risk (Balanced)", portfolios['medium_risk'], total_value, latest_prices, current_holdings)
         #print_portfolio_details("High Risk", portfolios['high_risk'], total_value, latest_prices, current_holdings)
+
 
 
 
