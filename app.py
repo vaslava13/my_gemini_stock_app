@@ -12,44 +12,36 @@ st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
 # --- HELPER FUNCTIONS ---
 
 def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_date=None):
-    """
-    Fetches stock prices and calculates optimal portfolios.
-    """
+    """Fetches stock prices and calculates optimal portfolios."""
     try:
-        # Download historical price data
         with st.spinner("Downloading historical stock data..."):
-            # Auto-adjust=True is important for splits/dividends
             df = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=True)
             
-            # Handle MultiIndex if necessary (yfinance update)
             if isinstance(df.columns, pd.MultiIndex):
                 try:
                     df = df['Close']
                 except KeyError:
-                    # Fallback if 'Close' isn't top level
                     df = df.xs('Close', level=0, axis=1)
 
         if df.empty:
             st.error("❌ No data downloaded. Please check your ticker symbols.")
-            return None, None, None
+            return None, None, None, None
 
-        # Remove stocks with missing data (NaNs)
-        df = df.dropna(axis=1, how='all') # Drop cols that are ALL NaN
-        df = df.dropna() # Drop rows with any NaN (clean timeline)
+        # Clean data
+        df = df.dropna(axis=1, how='all')
+        df = df.dropna() 
         
         if df.shape[1] < 2:
             st.error("⚠️ Not enough valid stocks to form a portfolio. At least two are required.")
-            return None, None, None
+            return None, None, None, None
 
         # --- Calculate current portfolio value and weights ---
         latest_prices = df.iloc[-1]
-        
-        # Filter holdings to only include what we successfully downloaded
         valid_tickers_held = [t for t in tickers if t in current_holdings and t in latest_prices.index]
 
         if not valid_tickers_held:
             st.error("❌ None of your tickers could be found in the data.")
-            return None, None, None
+            return None, None, None, None
 
         total_portfolio_value = sum(current_holdings[ticker] * latest_prices[ticker] for ticker in valid_tickers_held)
         
@@ -64,17 +56,17 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_d
 
         portfolios = {}
 
-        # 1. Lowest Risk (Minimum Volatility)
+        # 1. Lowest Risk
         ef_low = EfficientFrontier(mu, S)
         ef_low.min_volatility()
         portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
-        # 2. Medium Risk (Maximum Sharpe Ratio)
+        # 2. Medium Risk
         ef_med = EfficientFrontier(mu, S)
         ef_med.max_sharpe()
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
-        # 3. High Risk (Target High Return)
+        # 3. High Risk
         min_ret, _, _ = portfolios['low_risk']['performance']
         max_ret = mu.max()
         target_return = min_ret + 0.8 * (max_ret - min_ret)
@@ -84,11 +76,9 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_d
             ef_high.efficient_return(target_return)
             portfolios['high_risk'] = {'weights': ef_high.clean_weights(), 'performance': ef_high.portfolio_performance()}
         except:
-            # Fallback if aggressive target fails
             portfolios['high_risk'] = portfolios['medium_risk']
 
         # --- Plotting ---
-        # We calculate current portfolio stats for the plot
         current_weights_series = pd.Series(current_weights).reindex(df.columns, fill_value=0)
         curr_ret = np.sum(mu * current_weights_series)
         curr_std = np.sqrt(np.dot(current_weights_series.T, np.dot(S, current_weights_series)))
@@ -96,19 +86,12 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_d
         fig, ax = plt.subplots(figsize=(10, 6))
         plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
         
-        # Add markers
-        scenarios = [
-            ('low_risk', 'Lowest Risk', 'green', 'o'),
-            ('medium_risk', 'Max Sharpe', 'blue', '*'),
-            ('high_risk', 'High Risk', 'red', 'X')
-        ]
+        scenarios = [('low_risk', 'Lowest Risk', 'green', 'o'), ('medium_risk', 'Max Sharpe', 'blue', '*'), ('high_risk', 'High Risk', 'red', 'X')]
         for key, label, color, marker in scenarios:
             r, v, _ = portfolios[key]['performance']
             ax.scatter(v, r, marker=marker, s=150, c=color, label=label, zorder=5)
             
-        # Add Current Portfolio Marker
         ax.scatter(curr_std, curr_ret, marker='D', s=150, c='yellow', edgecolors='black', label='Current Portfolio', zorder=5)
-        
         ax.set_title("Efficient Frontier")
         ax.legend()
         plt.tight_layout()
@@ -161,11 +144,46 @@ def display_portfolio_results(tab, name, perf, weights, rebalancing_data):
         else:
             st.info("No significant rebalancing needed.")
 
+# --- NEW FUNCTION FOR COMPARISON TAB ---
+def analyze_stock(tickers, period):
+    """
+    Downloads data for one or more tickers and prepares comparison stats.
+    """
+    try:
+        with st.spinner(f"Fetching data for {period}..."):
+            df = yf.download(tickers, period=period, progress=False, auto_adjust=True)
+            
+            # Handle Data Format
+            if isinstance(df.columns, pd.MultiIndex):
+                try:
+                    df_close = df['Close']
+                except KeyError:
+                    # Fallback
+                    df_close = df.xs('Close', level=0, axis=1)
+            else:
+                # Single ticker case usually returns a DataFrame with 'Close' as a column
+                if 'Close' in df.columns:
+                    df_close = df[['Close']]
+                else:
+                    # If yfinance returns just the close data directly (rare but possible versions)
+                    df_close = df
+
+        if df_close.empty:
+            return None, None
+
+        # Normalize data (Percentage Growth from start of period)
+        # Formula: (Price / Start_Price - 1) * 100
+        normalized_df = (df_close / df_close.iloc[0] - 1) * 100
+        
+        return df_close, normalized_df
+
+    except Exception as e:
+        st.error(f"Error analyzing stocks: {e}")
+        return None, None
+
 # --- MAIN APPLICATION LOGIC ---
 
-# 1. Initialize Session State for the Portfolio Data
 if 'portfolio_data' not in st.session_state:
-    # Default example data
     st.session_state.portfolio_data = pd.DataFrame([
         {"Ticker": "AAPL", "Shares": 15},
         {"Ticker": "MSFT", "Shares": 20},
@@ -178,42 +196,26 @@ if 'portfolio_data' not in st.session_state:
 
 st.title("💰 AI Portfolio Optimizer")
 
-# 2. Create Top-Level Tabs
-input_tab, results_tab = st.tabs(["✏️ Edit Portfolio", "📈 Analysis Results"])
+# 2. Create Top-Level Tabs (Added 3rd Tab here)
+input_tab, results_tab, compare_tab = st.tabs(["✏️ Edit Portfolio", "📈 Analysis Results", "🔍 Stock Comparison"])
 
 # --- TAB 1: INPUT ---
 with input_tab:
     st.markdown("### Enter your Portfolio")
     st.caption("Double-click a cell to edit. Click '+ ' below the last row to add a new stock.")
     
-    # The Data Editor allowing users to add/delete rows
-    edited_df = st.data_editor(
-        st.session_state.portfolio_data,
-        num_rows="dynamic",
-        use_container_width=True
-    )
-    
-    # Save the edited data back to session state so it persists
+    edited_df = st.data_editor(st.session_state.portfolio_data, num_rows="dynamic", use_container_width=True)
     st.session_state.portfolio_data = edited_df
 
-    # Analyze Button
     if st.button("🚀 Analyze Portfolio", type="primary"):
-        # Validate Inputs
         if edited_df.empty:
             st.error("Please add at least one stock.")
         else:
-            # Prepare data for the optimizer
-            user_tickers = [t.upper() for t in edited_df["Ticker"].tolist() if t] # Ensure uppercase, no empty strings
-            user_holdings = {
-                row["Ticker"].upper(): row["Shares"] 
-                for _, row in edited_df.iterrows() 
-                if row["Ticker"]
-            }
+            user_tickers = [t.upper() for t in edited_df["Ticker"].tolist() if t]
+            user_holdings = {row["Ticker"].upper(): row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
             
-            # Run Optimization
             results = optimize_portfolio(user_tickers, user_holdings, start_date='2023-01-01')
             
-            # Store results in session state
             if results[0] is not None:
                 st.session_state.results = results
                 st.success("Optimization Complete! Switch to the 'Analysis Results' tab.")
@@ -226,20 +228,11 @@ with results_tab:
         portfolios, total_val, latest_prices, fig = st.session_state.results
         
         st.success(f"**Current Portfolio Value:** ${total_val:,.2f}")
-        
-        # Display the Efficient Frontier Plot
         st.pyplot(fig)
-        
         st.divider()
         
-        # Create the specific result tabs
         t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
-        
-        scenarios = [
-            (t1, 'low_risk', "Lowest Risk"),
-            (t2, 'medium_risk', "Balanced"),
-            (t3, 'high_risk', "High Risk")
-        ]
+        scenarios = [(t1, 'low_risk', "Lowest Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
         
         for tab, key, name in scenarios:
             p_data = portfolios[key]
@@ -252,3 +245,55 @@ with results_tab:
             
     else:
         st.info("👈 Please go to the 'Edit Portfolio' tab and click 'Analyze Portfolio' to see results.")
+
+# --- TAB 3: STOCK COMPARISON (NEW) ---
+with compare_tab:
+    st.header("Compare Stock Performance")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        # Get portfolio tickers for easy selection
+        default_tickers = st.session_state.portfolio_data["Ticker"].unique().tolist()
+        default_tickers = [t for t in default_tickers if t] # filter empty
+        
+        # User input: Multiselect for portfolio stocks + Text input for extras
+        selected_tickers = st.multiselect("Select stocks from your portfolio:", default_tickers, default=default_tickers[:3])
+        extra_tickers = st.text_input("Add other tickers (comma separated, e.g., TSLA, BTC-USD):")
+    
+    with col2:
+        period = st.selectbox("Time Period", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
+
+    if st.button("🔎 Compare Stocks"):
+        # Combine lists
+        final_tickers = selected_tickers.copy()
+        if extra_tickers:
+            extras = [t.strip().upper() for t in extra_tickers.split(",") if t.strip()]
+            final_tickers.extend(extras)
+        
+        # Remove duplicates
+        final_tickers = list(set(final_tickers))
+
+        if not final_tickers:
+            st.error("Please select or enter at least one ticker.")
+        else:
+            # Run the new analysis function 
+
+[Image of line chart comparing stock performance]
+
+            raw_data, norm_data = analyze_stock(final_tickers, period)
+            
+            if raw_data is not None:
+                st.subheader(f"📈 Performance Comparison ({period})")
+                st.caption("Chart shows percentage growth (normalized) so you can compare different stock prices fairly.")
+                st.line_chart(norm_data)
+                
+                st.subheader("📊 Summary Statistics")
+                # Calculate simple stats
+                summary_data = {
+                    "Current Price": raw_data.iloc[-1],
+                    "Start Price": raw_data.iloc[0],
+                    "Total Return (%)": ((raw_data.iloc[-1] / raw_data.iloc[0]) - 1) * 100,
+                    "Volatility (Std Dev)": raw_data.pct_change().std() * np.sqrt(252) * 100 # Annualized Volatility
+                }
+                st.dataframe(pd.DataFrame(summary_data).style.format("{:.2f}"))
