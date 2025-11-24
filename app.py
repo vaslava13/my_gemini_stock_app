@@ -1,333 +1,254 @@
+import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 from pypfopt import EfficientFrontier, risk_models, expected_returns
 from pypfopt.plotting import plot_efficient_frontier
-import matplotlib.pyplot as plt
-import numpy as np
-import streamlit as st
+
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
+
+# --- HELPER FUNCTIONS ---
 
 def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_date=None):
     """
-    Fetches stock prices, calculates three optimal portfolios (low, medium, high risk),
-    plots them on the efficient frontier along with the current portfolio,
-    and provides rebalancing advice with theoretical price targets.
-
-    Args:
-        tickers (list): A list of stock tickers.
-        current_holdings (dict): A dictionary of tickers and the number of shares owned.
-        start_date (str): The start date for fetching historical data (YYYY-MM-DD).
-        end_date (str): The end date for fetching historical data (YYYY-MM-DD).
-                           If None, it will fetch data up to the latest available.
-
-    Returns:
-        tuple: A tuple containing portfolio results (dict), total portfolio value (float),
-               and latest prices (pd.Series). Returns (None, None, None) if optimization fails.
+    Fetches stock prices and calculates optimal portfolios.
     """
     try:
         # Download historical price data
-        print("Downloading historical stock data...")
-        df = yf.download(tickers, start=start_date, end=end_date, progress=False)['Close']
+        with st.spinner("Downloading historical stock data..."):
+            # Auto-adjust=True is important for splits/dividends
+            df = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=True)
+            
+            # Handle MultiIndex if necessary (yfinance update)
+            if isinstance(df.columns, pd.MultiIndex):
+                try:
+                    df = df['Close']
+                except KeyError:
+                    # Fallback if 'Close' isn't top level
+                    df = df.xs('Close', level=0, axis=1)
 
         if df.empty:
-            print("No data downloaded. Please check the tickers and date range.")
+            st.error("❌ No data downloaded. Please check your ticker symbols.")
             return None, None, None
 
-        # Remove stocks with missing data for simplicity
-        df = df.dropna(axis=1)
+        # Remove stocks with missing data (NaNs)
+        df = df.dropna(axis=1, how='all') # Drop cols that are ALL NaN
+        df = df.dropna() # Drop rows with any NaN (clean timeline)
+        
         if df.shape[1] < 2:
-            print("Not enough valid stocks to form a portfolio. At least two are required.")
+            st.error("⚠️ Not enough valid stocks to form a portfolio. At least two are required.")
             return None, None, None
-
-        print("\nSuccessfully downloaded data for:", list(df.columns))
 
         # --- Calculate current portfolio value and weights ---
         latest_prices = df.iloc[-1]
-        valid_tickers_held = [t for t in tickers if t in current_holdings and t in latest_prices]
+        
+        # Filter holdings to only include what we successfully downloaded
+        valid_tickers_held = [t for t in tickers if t in current_holdings and t in latest_prices.index]
 
         if not valid_tickers_held:
-            print("None of the tickers in current_holdings are in the downloaded data.")
+            st.error("❌ None of your tickers could be found in the data.")
             return None, None, None
 
         total_portfolio_value = sum(current_holdings[ticker] * latest_prices[ticker] for ticker in valid_tickers_held)
-        print(f"\nTotal current portfolio value: ${total_portfolio_value:,.2f}")
-
+        
         current_weights = {
             ticker: (current_holdings[ticker] * latest_prices[ticker]) / total_portfolio_value
             for ticker in valid_tickers_held
         }
 
-        print("\nCurrent Portfolio Weights:")
-        for ticker, weight in current_weights.items():
-            print(f"{ticker}: {weight:.2%}")
-
         # --- Core Calculations ---
         mu = expected_returns.mean_historical_return(df)
         S = risk_models.sample_cov(df)
 
-        # --- NEW: Calculate current portfolio performance ---
-        current_weights_aligned = pd.Series(current_weights).reindex(df.columns, fill_value=0)
-        current_ret = np.sum(mu * current_weights_aligned)
-        current_std = np.sqrt(np.dot(current_weights_aligned.T, np.dot(S, current_weights_aligned)))
-        print("\nCurrent Portfolio Performance:")
-        print(f"  Expected annual return: {current_ret:.2%}")
-        print(f"  Annual volatility (risk): {current_std:.2%}")
-        # --- END NEW ---
-
         portfolios = {}
 
-        # 1. Lowest Risk (Minimum Volatility) Portfolio
-        ef_low_risk = EfficientFrontier(mu, S)
-        ef_low_risk.min_volatility()
-        portfolios['low_risk'] = {
-            'weights': ef_low_risk.clean_weights(),
-            'performance': ef_low_risk.portfolio_performance()
-        }
+        # 1. Lowest Risk (Minimum Volatility)
+        ef_low = EfficientFrontier(mu, S)
+        ef_low.min_volatility()
+        portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
-        # 2. Medium Risk (Maximum Sharpe Ratio) Portfolio
-        ef_medium_risk = EfficientFrontier(mu, S)
-        ef_medium_risk.max_sharpe()
-        portfolios['medium_risk'] = {
-            'weights': ef_medium_risk.clean_weights(),
-            'performance': ef_medium_risk.portfolio_performance()
-        }
+        # 2. Medium Risk (Maximum Sharpe Ratio)
+        ef_med = EfficientFrontier(mu, S)
+        ef_med.max_sharpe()
+        portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
-        # 3. High Risk (Targeting a high return) Portfolio
+        # 3. High Risk (Target High Return)
         min_ret, _, _ = portfolios['low_risk']['performance']
         max_ret = mu.max()
         target_return = min_ret + 0.8 * (max_ret - min_ret)
-
-        ef_high_risk = EfficientFrontier(mu, S)
-        ef_high_risk.efficient_return(target_return)
-        portfolios['high_risk'] = {
-            'weights': ef_high_risk.clean_weights(),
-            'performance': ef_high_risk.portfolio_performance()
-        }
+        
+        ef_high = EfficientFrontier(mu, S)
+        try:
+            ef_high.efficient_return(target_return)
+            portfolios['high_risk'] = {'weights': ef_high.clean_weights(), 'performance': ef_high.portfolio_performance()}
+        except:
+            # Fallback if aggressive target fails
+            portfolios['high_risk'] = portfolios['medium_risk']
 
         # --- Plotting ---
-        fig, ax = plt.subplots(figsize=(12, 7))
-        ef_plot = EfficientFrontier(mu, S)
-        plot_efficient_frontier(ef_plot, ax=ax, show_assets=False)
+        # We calculate current portfolio stats for the plot
+        current_weights_series = pd.Series(current_weights).reindex(df.columns, fill_value=0)
+        curr_ret = np.sum(mu * current_weights_series)
+        curr_std = np.sqrt(np.dot(current_weights_series.T, np.dot(S, current_weights_series)))
 
-        # Plot the three optimal portfolios
-        risk_levels = ['low_risk', 'medium_risk', 'high_risk']
-        labels = ['Lowest Risk', 'Max Sharpe Ratio', 'High Risk']
-        colors = ['green', 'blue', 'red']
-        markers = ['o', '*', 'X']
-
-        for i, risk in enumerate(risk_levels):
-            ret, std, _ = portfolios[risk]['performance']
-            ax.scatter(std, ret, marker=markers[i], s=150, c=colors[i], label=labels[i], zorder=5)
-
-        # --- NEW: Plot the current portfolio on the graph ---
-        ax.scatter(current_std, current_ret, marker='D', s=150, c='yellow',
-                   edgecolors='black', label='Current Portfolio', zorder=5)
-        # --- END NEW ---
-
-        ax.set_title("Efficient Frontier with Portfolio Options")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
+        
+        # Add markers
+        scenarios = [
+            ('low_risk', 'Lowest Risk', 'green', 'o'),
+            ('medium_risk', 'Max Sharpe', 'blue', '*'),
+            ('high_risk', 'High Risk', 'red', 'X')
+        ]
+        for key, label, color, marker in scenarios:
+            r, v, _ = portfolios[key]['performance']
+            ax.scatter(v, r, marker=marker, s=150, c=color, label=label, zorder=5)
+            
+        # Add Current Portfolio Marker
+        ax.scatter(curr_std, curr_ret, marker='D', s=150, c='yellow', edgecolors='black', label='Current Portfolio', zorder=5)
+        
+        ax.set_title("Efficient Frontier")
         ax.legend()
         plt.tight_layout()
 
-        print("\nPlotting the efficient frontier. Please close the plot window to continue.")
-        plt.show()
-
-        return portfolios, total_portfolio_value, latest_prices
+        return portfolios, total_portfolio_value, latest_prices, fig
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return None, None, None
-
-def print_portfolio_details(name, data, total_value, latest_prices, current_holdings):
-    """Helper function to print details for a single portfolio."""
-    weights = data['weights']
-    performance = data['performance']
-    expected_return = performance[0]
-
-    print("\n" + "="*50)
-    print(f"      {name.upper()} PORTFOLIO")
-    print("="*50)
-
-    print("\n  Portfolio Performance:")
-    print(f"    Expected annual return: {expected_return:.2%}")
-    print(f"    Annual volatility: {performance[1]:.2%}")
-    print(f"    Sharpe Ratio: {performance[2]:.2f}")
-
-    print("\n  Optimal Portfolio Weights:")
-    for ticker, weight in weights.items():
-        if weight > 0:
-            print(f"    {ticker}: {weight:.2%}")
-
-    print("\n  Rebalancing and Price Target Recommendations:")
-    print("  ---------------------------------------------")
-    for ticker in latest_prices.index:
-        optimal_weight = weights.get(ticker, 0)
-        current_shares = current_holdings.get(ticker, 0)
-        current_value = current_shares * latest_prices.get(ticker, 0)
-        target_value = total_value * optimal_weight
-        target_shares = target_value / latest_prices.get(ticker, 1)
-        shares_to_trade = target_shares - current_shares
-        action = "Buy" if shares_to_trade > 0 else "Sell"
-        price_target = latest_prices.get(ticker, 0) * (1 + expected_return)
-
-        print(f"\n  {ticker}:")
-        print(f"    Current Shares: {current_shares:.2f} (${current_value:,.2f})")
-        print(f"    Target Shares:  {target_shares:.2f} (${target_value:,.2f})")
-        if abs(shares_to_trade) > 0.01:
-            print(f"    Action: {action} {abs(shares_to_trade):.2f} shares")
-        print(f"    Theoretical 1-Year Price Target: ${price_target:,.2f}")
-
-# Helper function to display portfolio data nicely
-def display_portfolio_results(tab, name, expected_return, volatility, sharpe, weights, rebalancing_data):
-    with tab:
-        st.subheader(f"{name} Strategy")
-        
-        # 1. Display Top-Level Metrics in Columns
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Expected Annual Return", f"{expected_return:.2f}%")
-        col2.metric("Annual Volatility (Risk)", f"{volatility:.2f}%")
-        col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-
-        # 2. Display Weights (Pie Chart or Bar Chart)
-        st.markdown("### 📊 Recommended Allocation")
-        
-        # Convert weights dict to DataFrame for plotting
-        # Filter out 0% weights to make the chart cleaner
-        active_weights = {k: v for k, v in weights.items() if v > 0.0001}
-        df_weights = pd.DataFrame.from_dict(active_weights, orient='index', columns=['Weight'])
-        df_weights['Weight'] = df_weights['Weight'] * 100 # Convert to percentage
-        
-        st.bar_chart(df_weights)
-
-        # 3. Display Rebalancing Logic as a DataFrame (Instead of text list)
-        st.markdown("### 🔄 Rebalancing Action Plan")
-        
-        if rebalancing_data:
-            df_rebal = pd.DataFrame(rebalancing_data)
-            st.dataframe(
-                df_rebal, 
-                use_container_width=True,
-                column_config={
-                    "Ticker": "Ticker",
-                    "Action": "Action",
-                    "Amount": "Shares to Trade",
-                    "Target Price (1Y)": st.column_config.NumberColumn(format="$%.2f")
-                }
-            )
-        else:
-            st.info("No rebalancing required.")
+        st.error(f"An error occurred during optimization: {e}")
+        return None, None, None, None
 
 def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_value, expected_return):
-    """
-    Calculates buy/sell actions and returns them as a list of dictionaries 
-    for the Streamlit DataFrame.
-    """
+    """Generates the Buy/Sell table."""
     rebal_data = []
-    
-    # Iterate through all tickers for which we have price data
     for ticker in latest_prices.index:
         optimal_weight = weights.get(ticker, 0)
         current_shares = current_holdings.get(ticker, 0)
-        
-        # Calculate values
         target_value = total_value * optimal_weight
         current_price = latest_prices.get(ticker, 0)
         
-        # Avoid division by zero if price is missing
         if current_price > 0:
             target_shares = target_value / current_price
             shares_to_trade = target_shares - current_shares
-            
-            # Theoretical price target logic
             price_target = current_price * (1 + expected_return)
             
-            # Only add to list if there is a significant trade needed (e.g., > 0.1 shares)
             if abs(shares_to_trade) > 0.01:
-                action = "Buy" if shares_to_trade > 0 else "Sell"
                 rebal_data.append({
                     "Ticker": ticker,
-                    "Action": action,
-                    "Shares to Trade": float(f"{abs(shares_to_trade):.2f}"), # Format for clean display
+                    "Action": "Buy" if shares_to_trade > 0 else "Sell",
+                    "Shares to Trade": float(f"{abs(shares_to_trade):.2f}"),
                     "Target Price (1Y)": float(f"{price_target:.2f}")
                 })
-                
     return rebal_data
+
+def display_portfolio_results(tab, name, perf, weights, rebalancing_data):
+    """Renders the results in a specific Streamlit tab."""
+    with tab:
+        st.subheader(f"{name} Strategy")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Expected Return", f"{perf[0]*100:.2f}%")
+        c2.metric("Volatility (Risk)", f"{perf[1]*100:.2f}%")
+        c3.metric("Sharpe Ratio", f"{perf[2]:.2f}")
+
+        st.markdown("### 📊 Recommended Allocation")
+        active_weights = {k: v*100 for k, v in weights.items() if v > 0.001}
+        st.bar_chart(pd.DataFrame.from_dict(active_weights, orient='index', columns=['Weight (%)']))
+
+        st.markdown("### 🔄 Rebalancing Plan")
+        if rebalancing_data:
+            st.dataframe(pd.DataFrame(rebalancing_data), use_container_width=True)
+        else:
+            st.info("No significant rebalancing needed.")
+
+# --- MAIN APPLICATION LOGIC ---
+
+# 1. Initialize Session State for the Portfolio Data
+if 'portfolio_data' not in st.session_state:
+    # Default example data
+    st.session_state.portfolio_data = pd.DataFrame([
+        {"Ticker": "AAPL", "Shares": 15},
+        {"Ticker": "MSFT", "Shares": 20},
+        {"Ticker": "GOOGL", "Shares": 30},
+        {"Ticker": "NVDA", "Shares": 48},
+        {"Ticker": "SLF", "Shares": 95},
+        {"Ticker": "ENB", "Shares": 47},
+        {"Ticker": "AMZN", "Shares": 5}
+    ])
+
+st.title("💰 AI Portfolio Optimizer")
+
+# 2. Create Top-Level Tabs
+input_tab, results_tab = st.tabs(["✏️ Edit Portfolio", "📈 Analysis Results"])
+
+# --- TAB 1: INPUT ---
+with input_tab:
+    st.markdown("### Enter your Portfolio")
+    st.caption("Double-click a cell to edit. Click '+ ' below the last row to add a new stock.")
     
-
-if __name__ == '__main__':
-    # --- User Input ---
-    portfolio_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'SLF', 'ENB', 'BEPC', 'LAZR', 'BIPC', 'PYPL']
-
-    current_holdings = {
-        'AAPL': 15, 'MSFT': 20, 'GOOGL': 30, 'AMZN': 5, 'NVDA': 48,
-        'SLF': 95, 'ENB': 47, 'LAZR': 1, 'BEPC': 15, 'BIPC': 12, 'PYPL': 5
-    }
-    start = '2023-01-01' # Using a longer start date for more robust historical data
-
-    print("Starting portfolio optimization...")
-    portfolios, total_value, latest_prices = optimize_portfolio(
-        portfolio_tickers, current_holdings, start_date=start
+    # The Data Editor allowing users to add/delete rows
+    edited_df = st.data_editor(
+        st.session_state.portfolio_data,
+        num_rows="dynamic",
+        use_container_width=True
     )
+    
+    # Save the edited data back to session state so it persists
+    st.session_state.portfolio_data = edited_df
 
-    if portfolios:
-        print("\n\n" + "#"*60)
-        print("                   PORTFOLIO OPTIMIZATION SUMMARY")
-        print("#"*60)
+    # Analyze Button
+    if st.button("🚀 Analyze Portfolio", type="primary"):
+        # Validate Inputs
+        if edited_df.empty:
+            st.error("Please add at least one stock.")
+        else:
+            # Prepare data for the optimizer
+            user_tickers = [t.upper() for t in edited_df["Ticker"].tolist() if t] # Ensure uppercase, no empty strings
+            user_holdings = {
+                row["Ticker"].upper(): row["Shares"] 
+                for _, row in edited_df.iterrows() 
+                if row["Ticker"]
+            }
+            
+            # Run Optimization
+            results = optimize_portfolio(user_tickers, user_holdings, start_date='2023-01-01')
+            
+            # Store results in session state
+            if results[0] is not None:
+                st.session_state.results = results
+                st.success("Optimization Complete! Switch to the 'Analysis Results' tab.")
+            else:
+                st.session_state.results = None
 
-        print_portfolio_details("Lowest Risk", portfolios['low_risk'], total_value, latest_prices, current_holdings)
-        print_portfolio_details("Medium Risk (Balanced)", portfolios['medium_risk'], total_value, latest_prices, current_holdings)
-        print_portfolio_details("High Risk", portfolios['high_risk'], total_value, latest_prices, current_holdings)
-
-        print("\n\n" + "="*50)
-        print("Disclaimer:")
-        print("The 'Theoretical 1-Year Price Target' is not financial advice or a price prediction. It is calculated by applying the portfolio's overall expected annual return to the stock's current price. This is based on historical data and assumes past performance will continue, which is not guaranteed.")
-        print("="*50)
-
-
-    print("\nOptimization complete.")
-
-    # ... (Your existing code where you calculate metrics) ...
-   
-    st.divider()
-    st.header("🎯 Portfolio Optimization Results")
-
-    if portfolios:
-        # 1. Create the tabs
-        tab1, tab2, tab3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
-
-        # 2. Define the mapping between tabs and your portfolio keys
-        # Format: (Tab Object, Dictionary Key, Display Name)
+# --- TAB 2: RESULTS ---
+with results_tab:
+    if 'results' in st.session_state and st.session_state.results is not None:
+        portfolios, total_val, latest_prices, fig = st.session_state.results
+        
+        st.success(f"**Current Portfolio Value:** ${total_val:,.2f}")
+        
+        # Display the Efficient Frontier Plot
+        st.pyplot(fig)
+        
+        st.divider()
+        
+        # Create the specific result tabs
+        t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
+        
         scenarios = [
-            (tab1, 'low_risk', "Lowest Risk"),
-            (tab2, 'medium_risk', "Balanced"),
-            (tab3, 'high_risk', "High Risk")
+            (t1, 'low_risk', "Lowest Risk"),
+            (t2, 'medium_risk', "Balanced"),
+            (t3, 'high_risk', "High Risk")
         ]
-
-        # 3. Loop through each scenario and display the REAL data
+        
         for tab, key, name in scenarios:
-            
-            # Get the specific portfolio data
-            portfolio_data = portfolios[key]
-            perf = portfolio_data['performance'] # tuple: (return, volatility, sharpe)
-            weights = portfolio_data['weights']
-            
-            # Calculate the specific rebalancing plan for THIS strategy
-            rebalancing_plan = calculate_rebalancing_plan(
-                weights=weights,
-                latest_prices=latest_prices,
-                current_holdings=current_holdings,
-                total_value=total_value,
-                expected_return=perf[0]
+            p_data = portfolios[key]
+            rebal_plan = calculate_rebalancing_plan(
+                p_data['weights'], latest_prices, 
+                {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
+                total_val, p_data['performance'][0]
             )
+            display_portfolio_results(tab, name, p_data['performance'], p_data['weights'], rebal_plan)
             
-            # Send data to the display function
-            # Note: We multiply by 100 to convert decimals (0.19) to percents (19%)
-            display_portfolio_results(
-                tab=tab,
-                name=name,
-                expected_return=perf[0] * 100, 
-                volatility=perf[1] * 100,
-                sharpe=perf[2],
-                weights=weights,
-                rebalancing_data=rebalancing_plan
-            )
     else:
-        st.error("Optimization failed. Please check your data.")
+        st.info("👈 Please go to the 'Edit Portfolio' tab and click 'Analyze Portfolio' to see results.")
