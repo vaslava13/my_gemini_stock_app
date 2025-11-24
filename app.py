@@ -4,6 +4,7 @@ from pypfopt import EfficientFrontier, risk_models, expected_returns
 from pypfopt.plotting import plot_efficient_frontier
 import matplotlib.pyplot as plt
 import numpy as np
+import streamlit as st
 
 def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_date=None):
     """
@@ -205,3 +206,4 @@ if __name__ == '__main__':
 
 
     print("\nOptimization complete.")
+
