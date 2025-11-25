@@ -16,8 +16,6 @@ from pypfopt.plotting import plot_efficient_frontier
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
 
 # --- API KEYS (PASTE YOUR KEYS HERE) ---
-NEWS_API_KEY = "30792ed52be642cf8f1a7e4672a86837"
-GEMINI_API_KEY = "AIzaSyC3pND040DDoR99-rQZjqonXniwIsdAiq0"
 
 # --- HELPER FUNCTIONS (NEWS & AI) ---
 
@@ -576,3 +574,4 @@ with deep_dive_tab:
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
         analyze_single_stock_financials(dd_ticker, dd_period)
+
