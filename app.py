@@ -420,13 +420,13 @@ with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
     st.caption("Analyze Price, Volume, Technical Indicators, and Financials.")
     
-    col_d1, col_d2, col_d3 = st.columns([1, 1, 3])
+    col_d1, col_d2 = st.columns([3, 1])
     with col_d1:
         dd_ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL):", value="AAPL").upper()
-    with col_d2:
         dd_period = st.selectbox("History Period", ["3mo", "6mo", "1y", "2y"], index=2, key="dd_period")
-    with col_d3:
+    with col_d2:
         st.write("") # Spacer
         if st.button("📊 Analyze Company"):
             analyze_single_stock_financials(dd_ticker, dd_period)
+
 
