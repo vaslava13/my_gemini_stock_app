@@ -429,6 +429,3 @@ with deep_dive_tab:
         st.write("") # Spacer
         if st.button("📊 Analyze Company"):
             analyze_single_stock_financials(dd_ticker, dd_period)
-```
-
-
