@@ -1,17 +1,3 @@
-This is a fantastic feature to add. Integrating **Technical Analysis (TA)** transforms your app from a basic viewer into a serious trading tool.
-
-To do this without breaking your app with new complex installations, I have written custom helper functions using standard `pandas`. This calculates:
-
-1.  **RSI (Relative Strength Index):** To spot overbought (\>70) or oversold (\<30) conditions.
-2.  **MACD (Moving Average Convergence Divergence):** To identify momentum shifts.
-3.  **SMA (Simple Moving Averages):** The 50-day and 200-day averages to see the long-term trend.
-4.  **Candlestick Charts:** Replaces the simple line line chart in the "Deep Dive" for professional analysis.
-
-Here is the **Complete, Updated `app.py`**.
-
-### **Copy and Paste this Full Code**
-
-```python
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -444,3 +430,4 @@ with deep_dive_tab:
         if st.button("📊 Analyze Company"):
             analyze_single_stock_financials(dd_ticker, dd_period)
 ```
+
