@@ -1,3 +1,17 @@
+This is a fantastic feature to add. Integrating **Technical Analysis (TA)** transforms your app from a basic viewer into a serious trading tool.
+
+To do this without breaking your app with new complex installations, I have written custom helper functions using standard `pandas`. This calculates:
+
+1.  **RSI (Relative Strength Index):** To spot overbought (\>70) or oversold (\<30) conditions.
+2.  **MACD (Moving Average Convergence Divergence):** To identify momentum shifts.
+3.  **SMA (Simple Moving Averages):** The 50-day and 200-day averages to see the long-term trend.
+4.  **Candlestick Charts:** Replaces the simple line line chart in the "Deep Dive" for professional analysis.
+
+Here is the **Complete, Updated `app.py`**.
+
+### **Copy and Paste this Full Code**
+
+```python
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -280,4 +294,153 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
             # Row 3: MACD
-            fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=3,
+            fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=3, col=1)
+            fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD'], name='MACD', line=dict(color='blue', width=1)), row=3, col=1)
+            fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD_Signal'], name='Signal', line=dict(color='orange', width=1)), row=3, col=1)
+
+            # Layout updates
+            fig.update_layout(title_text=f'Technical Analysis: {ticker_symbol}', title_x=0.5, height=900, template='plotly_dark', showlegend=False, xaxis_rangeslider_visible=False)
+            
+            # --- CENTERING LOGIC ---
+            spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
+            
+            with content_col:
+                st.plotly_chart(fig, use_container_width=True)
+
+                # 2. Financial Statements
+                st.subheader("📑 Financial Statements")
+                
+                income_stmt = stock.quarterly_income_stmt
+                balance_sheet = stock.quarterly_balance_sheet
+                cash_flow = stock.quarterly_cashflow
+
+                tab_f1, tab_f2, tab_f3 = st.tabs(["Income Statement", "Balance Sheet", "Cash Flow"])
+                
+                with tab_f1:
+                    if not income_stmt.empty:
+                        st.dataframe((income_stmt / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+                    else:
+                        st.info("Income statement not available.")
+                with tab_f2:
+                    if not balance_sheet.empty:
+                        st.dataframe((balance_sheet / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+                    else:
+                        st.info("Balance sheet not available.")
+                with tab_f3:
+                    if not cash_flow.empty:
+                        st.dataframe((cash_flow / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+                    else:
+                        st.info("Cash flow statement not available.")
+
+                if not income_stmt.empty and not cash_flow.empty:
+                    st.subheader("📊 Key Financial Metrics")
+                    fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
+                    if fig_metrics:
+                        st.plotly_chart(fig_metrics, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+
+# --- MAIN APPLICATION LOGIC ---
+
+if 'portfolio_data' not in st.session_state:
+    st.session_state.portfolio_data = pd.DataFrame([
+        {"Ticker": "AAPL", "Shares": 15},
+        {"Ticker": "MSFT", "Shares": 20},
+        {"Ticker": "GOOGL", "Shares": 30},
+        {"Ticker": "NVDA", "Shares": 48},
+        {"Ticker": "SLF", "Shares": 95},
+        {"Ticker": "ENB", "Shares": 47},
+        {"Ticker": "AMZN", "Shares": 5}
+    ])
+
+st.title("💰 AI Portfolio Optimizer")
+
+input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
+    "✏️ Edit Portfolio", 
+    "📈 Analysis Results", 
+    "🔍 Stock Comparison",
+    "📊 Single Stock Deep Dive"
+])
+
+# --- TAB 1: INPUT ---
+with input_tab:
+    st.markdown("### Enter your Portfolio")
+    edited_df = st.data_editor(st.session_state.portfolio_data, num_rows="dynamic", use_container_width=True)
+    st.session_state.portfolio_data = edited_df
+
+    if st.button("🚀 Analyze Portfolio", type="primary"):
+        if edited_df.empty:
+            st.error("Please add at least one stock.")
+        else:
+            user_tickers = [t.upper() for t in edited_df["Ticker"].tolist() if t]
+            user_holdings = {row["Ticker"].upper(): row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
+            results = optimize_portfolio(user_tickers, user_holdings, start_date='2023-01-01')
+            if results[0] is not None:
+                st.session_state.results = results
+                st.success("Optimization Complete! Switch to the 'Analysis Results' tab.")
+            else:
+                st.session_state.results = None
+
+# --- TAB 2: RESULTS ---
+with results_tab:
+    if 'results' in st.session_state and st.session_state.results is not None:
+        portfolios, total_val, latest_prices, fig = st.session_state.results
+        st.success(f"**Current Portfolio Value:** ${total_val:,.2f}")
+        st.pyplot(fig)
+        st.divider()
+        t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
+        scenarios = [(t1, 'low_risk', "Lowest Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
+        for tab, key, name in scenarios:
+            p_data = portfolios[key]
+            rebal_plan = calculate_rebalancing_plan(
+                p_data['weights'], latest_prices, 
+                {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
+                total_val, p_data['performance'][0]
+            )
+            display_portfolio_results(tab, name, p_data['performance'], p_data['weights'], rebal_plan)
+    else:
+        st.info("👈 Please go to the 'Edit Portfolio' tab and click 'Analyze Portfolio'.")
+
+# --- TAB 3: COMPARISON ---
+with compare_tab:
+    st.header("Compare Stock Performance")
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        default_tickers = [t for t in st.session_state.portfolio_data["Ticker"].unique() if t]
+        selected_tickers = st.multiselect("Select portfolio stocks:", default_tickers, default=default_tickers[:3])
+        extra_tickers = st.text_input("Add other tickers (comma separated):")
+    with c2:
+        period = st.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
+
+    if st.button("🔎 Compare Stocks"):
+        final_tickers = list(set(selected_tickers + [t.strip().upper() for t in extra_tickers.split(",") if t.strip()]))
+        if not final_tickers:
+            st.error("Select at least one ticker.")
+        else:
+            raw_data, norm_data, tech_summary = analyze_stock_comparison(final_tickers, period)
+            if raw_data is not None:
+                st.subheader("Performance Chart (Normalized Returns)")
+                st.line_chart(norm_data)
+                
+                st.subheader("Technical Analysis Snapshot")
+                if tech_summary:
+                    st.dataframe(pd.DataFrame(tech_summary), use_container_width=True)
+                else:
+                    st.warning("Not enough data to calculate technical indicators for these stocks.")
+
+# --- TAB 4: DEEP DIVE ---
+with deep_dive_tab:
+    st.header("🏢 Single Company Deep Dive")
+    st.caption("Analyze Price, Volume, Technical Indicators, and Financials.")
+    
+    col_d1, col_d2, col_d3 = st.columns([2, 1, 1])
+    with col_d1:
+        dd_ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL):", value="AAPL").upper()
+    with col_d2:
+        dd_period = st.selectbox("History Period", ["3mo", "6mo", "1y", "2y"], index=2, key="dd_period")
+    with col_d3:
+        st.write("") # Spacer
+        if st.button("📊 Analyze Company"):
+            analyze_single_stock_financials(dd_ticker, dd_period)
+```
