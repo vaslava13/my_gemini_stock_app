@@ -15,72 +15,64 @@ from pypfopt.plotting import plot_efficient_frontier
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
 
-# --- API KEYS ---
-# You ONLY need the Gemini Key now. News is fetched free via yfinance.
-GEMINI_API_KEY = "AIzaSyC3pND040DDoR99-rQZjqonXniwIsdAiq0" 
+# --- API KEYS (PASTE YOUR KEYS HERE) ---
+# Note: For a deployed app, it is safer to use st.secrets
+NEWS_API_KEY = "30792ed52be642cf8f1a7e4672a86837" 
+GEMINI_API_KEY = "AIzaSyC3pND040DDoR99-rQZjqonXniwIsdAiq0"
 
 # --- HELPER FUNCTIONS (NEWS & AI) ---
 
-def fetch_news_yfinance(ticker_symbol):
-    """Fetches news directly from Yahoo Finance (No API Key needed)."""
+def fetch_news_from_api(ticker_symbol, company_name):
+    """Fetches news articles from NewsAPI."""
+    if NEWS_API_KEY == "YOUR_NEWS_API_KEY":
+        return None
+        
+    one_week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    search_query = f'("{ticker_symbol}" OR "{company_name}")'
+    
+    url = (f'https://newsapi.org/v2/everything?'
+           f'q={search_query}&'
+           f'from={one_week_ago}&'
+           f'sortBy=publishedAt&'
+           f'language=en&'
+           f'apiKey={NEWS_API_KEY}')
+    
     try:
-        stock = yf.Ticker(ticker_symbol)
-        news = stock.news
-        return news if news else []
-    except Exception as e:
-        st.warning(f"Could not fetch news: {e}")
-        return []
+        response = requests.get(url)
+        if response.status_code != 200: return None
+        data = response.json()
+        return data.get('articles', [])
+    except Exception:
+        return None
 
 def get_gemini_analysis(ticker, news_articles):
-    """Analyzes news using Gemini API with Aggregation."""
-    if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY" or not GEMINI_API_KEY:
+    """Analyzes news using Gemini API."""
+    if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY":
         return None
 
     headlines = ""
-    # yfinance news structure is slightly different, handle it here
-    for i, article in enumerate(news_articles[:20]): 
+    for i, article in enumerate(news_articles[:15]): # Limit to top 15 to save tokens
         title = article.get('title')
-        link = article.get('link')
-        if title and link:
-            headlines += f"- {title} [URL: {link}]\n"
+        url = article.get('url')
+        if title and url:
+            headlines += f"{i+1}. {title} [Source: {url}]\n"
 
     if not headlines: return None
 
-    # Strict JSON Prompt
     system_prompt = textwrap.dedent("""
-        You are a senior financial analyst. Synthesize these news headlines into a structured JSON report.
-        
-        1. Group headlines into these categories (only use relevant ones): 
-           - Financial Performance
-           - Products & Services
-           - Partnerships & Deals
-           - Legal & Regulatory
-           - Market Sentiment
-           - Other
-        
-        2. For EACH category with news:
-           - 'impact': (Positive, Negative, or Neutral).
-           - 'main_message': A concise paragraph summarizing the key theme.
-           - 'articles': List of objects with 'title' and 'url'.
-
-        3. Return ONLY valid JSON. No markdown formatting.
-        Structure:
-        {
-            "categories": [
-                {
-                    "name": "Category Name",
-                    "impact": "Positive",
-                    "main_message": "Summary...",
-                    "articles": [{"title": "...", "url": "..."}]
-                }
-            ]
-        }
+        You are a financial analyst. Analyze these news headlines for the company.
+        Return a JSON object with a 'news_analysis' list.
+        For each relevant item found, create an object with:
+        - "category": (Financials, Products, Partnerships, Legal, Sentiment, or Other)
+        - "summary": Brief neutral summary.
+        - "impact": (Positive, Negative, or Neutral)
+        - "source": The source URL.
+        Only include categories that have actual news.
     """).strip()
 
     user_query = f"Analyze headlines for {ticker}:\n\n{headlines}"
     
-    # Using gemini-1.5-flash as it is stable and fast
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
@@ -90,15 +82,11 @@ def get_gemini_analysis(ticker, news_articles):
 
     try:
         response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'})
-        if response.status_code != 200: 
-            st.error(f"Gemini API Error: {response.status_code}")
-            return None
-            
+        if response.status_code != 200: return None
         result = response.json()
         text_resp = result['candidates'][0]['content']['parts'][0]['text']
         return json.loads(text_resp)
-    except Exception as e:
-        st.error(f"AI Analysis Failed: {e}")
+    except Exception:
         return None
 
 # --- HELPER FUNCTIONS (CALCULATIONS) ---
@@ -108,12 +96,14 @@ def calculate_technical_indicators(df):
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
 
+    # RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
 
+    # MACD
     ema_12 = df['Close'].ewm(span=12, adjust=False).mean()
     ema_26 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = ema_12 - ema_26
@@ -154,14 +144,17 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_d
         S = risk_models.sample_cov(df)
 
         portfolios = {}
+        # 1. Low Risk
         ef_low = EfficientFrontier(mu, S)
         ef_low.min_volatility()
         portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
+        # 2. Medium Risk
         ef_med = EfficientFrontier(mu, S)
         ef_med.max_sharpe()
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
+        # 3. High Risk
         min_ret, _, _ = portfolios['low_risk']['performance']
         max_ret = mu.max()
         target_return = min_ret + 0.8 * (max_ret - min_ret)
@@ -420,35 +413,29 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                     fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
                     if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
 
-                # 5. AI News Analysis (Aggregated)
-                st.divider()
-                st.subheader(f"📰 AI-Powered News Analysis: {ticker_symbol}")
-                st.caption("Aggregated news categories, sentiment, and summaries using Gemini 1.5.")
+                # 5. NEW: AI News Analysis
+                st.subheader(f"📰 AI News Analysis: {ticker_symbol}")
+                st.caption("Using Gemini 2.0 Flash to analyze recent news headlines (Last 7 days).")
                 
                 with st.status("Fetching and analyzing news...", expanded=True) as status:
-                    news_articles = fetch_news_yfinance(ticker_symbol)
+                    company_name = stock.info.get('shortName', ticker_symbol)
+                    news_articles = fetch_news_from_api(ticker_symbol, company_name)
                     
                     if news_articles:
-                        status.write(f"✅ Found {len(news_articles)} articles. Analyzing with Gemini...")
+                        status.write(f"✅ Found {len(news_articles)} articles. Analyzing with AI...")
                         analysis = get_gemini_analysis(ticker_symbol, news_articles)
                         
-                        if analysis and 'categories' in analysis:
+                        if analysis and 'news_analysis' in analysis:
                             status.update(label="Analysis Complete!", state="complete", expanded=False)
                             
-                            for cat in analysis['categories']:
-                                # Define color based on impact
-                                if cat['impact'] == "Positive": color = "green"
-                                elif cat['impact'] == "Negative": color = "red"
-                                else: color = "gray"
-                                
-                                with st.expander(f"{cat['name']} | :{color}[{cat['impact']}]"):
-                                    st.markdown(f"**Summary:** {cat['main_message']}")
-                                    st.markdown("---")
-                                    st.markdown("**Sources:**")
-                                    for art in cat.get('articles', []):
-                                        st.markdown(f"- [{art['title']}]({art['url']})")
+                            for item in analysis['news_analysis']:
+                                color = "green" if item['impact'] == "Positive" else "red" if item['impact'] == "Negative" else "gray"
+                                with st.expander(f"{item['category']} | :{color}[{item['impact']}]"):
+                                    st.write(item['summary'])
+                                    st.markdown(f"[Read Source]({item['source']})")
                         else:
-                            status.update(label="AI Analysis Failed (or no relevant news)", state="error")
+                            status.update(label="AI Analysis Failed", state="error")
+                            st.error("Could not generate analysis.")
                     else:
                         status.update(label="No News Found", state="error")
                         st.warning("No recent news articles found for this stock.")
@@ -457,6 +444,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
         st.error(f"An error occurred: {e}")
 
 # --- MAIN APPLICATION LOGIC ---
+
 if 'portfolio_data' not in st.session_state:
     st.session_state.portfolio_data = pd.DataFrame([
         {"Ticker": "AAPL", "Shares": 15},
@@ -557,4 +545,4 @@ with deep_dive_tab:
     
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
-        analyze_single_stock_financials(dd_ticker, dd_period)
+            analyze_single_stock_financials(dd_ticker, dd_period)
