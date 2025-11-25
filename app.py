@@ -297,8 +297,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                     st.info("P/E data unavailable.")
 
                 # 2. Technical Analysis Plot 
-
-[Image of line chart comparing stock performance]
+                #[Image of line chart comparing stock performance]
 
                 st.subheader("📉 Technical Analysis")
                 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD'))
@@ -435,3 +434,4 @@ with deep_dive_tab:
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
         analyze_single_stock_financials(dd_ticker, dd_period)
+
