@@ -304,8 +304,6 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             with content_col:
                 # 1. Simple Price Plot 
 
-[Image of line chart comparing stock performance]
-
                 st.subheader("📈 Price History")
                 fig_price = plot_price_history(hist_plot, ticker_symbol)
                 if fig_price: st.plotly_chart(fig_price, use_container_width=True)
@@ -454,3 +452,4 @@ with deep_dive_tab:
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
         analyze_single_stock_financials(dd_ticker, dd_period)
+
