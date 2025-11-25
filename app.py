@@ -196,48 +196,17 @@ def analyze_stock_comparison(tickers, period):
         st.error(f"Error analyzing stocks: {e}")
         return None, None, None
 
-# --- NEW HELPER FUNCTIONS (DEEP DIVE FINANCIALS & P/E) ---
+# --- NEW HELPER FUNCTIONS (DEEP DIVE) ---
 
-def plot_price_and_pe(stock, hist_df, ticker_symbol):
-    """
-    Plots Price (Left Axis) vs Calculated P/E Ratio (Right Axis).
-    """
+def plot_price_history(hist_df, ticker_symbol):
+    """Plots Price vs Time (Simple Line Chart)."""
     try:
-        # 1. Get Quarterly EPS
-        income = stock.quarterly_income_stmt
-        if income.empty or 'Basic EPS' not in income.index:
-            return None
-        
-        # Get EPS and sort chronologically
-        eps = income.loc['Basic EPS'].sort_index()
-        ttm_eps = eps.rolling(window=4).sum()
-        
-        # 2. Align TTM EPS with Daily Price Data
-        aligned_eps = ttm_eps.reindex(hist_df.index, method='ffill')
-        
-        # 3. Calculate Daily P/E Ratio
-        pe_series = hist_df['Close'] / aligned_eps
-        
-        # 4. Create Dual Axis Plot
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        
-        fig.add_trace(go.Scatter(x=hist_df.index, y=hist_df['Close'], name='Stock Price', line=dict(color='cyan')), secondary_y=False)
-        fig.add_trace(go.Scatter(x=hist_df.index, y=pe_series, name='P/E Ratio', line=dict(color='orange', dash='dot')), secondary_y=True)
-        
-        fig.update_layout(
-            title_text=f"{ticker_symbol}: Price vs Valuation (P/E)",
-            title_x=0.5,
-            height=600,
-            template="plotly_dark",
-            hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
-        fig.update_yaxes(title_text="Stock Price ($)", secondary_y=False)
-        fig.update_yaxes(title_text="P/E Ratio", secondary_y=True, showgrid=False)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=hist_df.index, y=hist_df['Close'], name='Stock Price', line=dict(color='cyan', width=2)))
+        fig.update_layout(title_text=f"{ticker_symbol}: Price History", title_x=0.5, height=500, template="plotly_dark", hovermode="x unified", xaxis_title="Date", yaxis_title="Price ($)")
         return fig
-        
     except Exception as e:
-        st.warning(f"Could not calculate P/E History (Data missing): {e}")
+        st.warning(f"Could not plot price history: {e}")
         return None
 
 def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
@@ -266,7 +235,7 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
         return None
 
 def analyze_single_stock_financials(ticker_symbol, period="2y"):
-    """Downloads and displays deep-dive financials + PE + Technicals."""
+    """Downloads and displays deep-dive financials + Simple Price + Complex Technicals."""
     try:
         stock = yf.Ticker(ticker_symbol)
         
@@ -288,16 +257,14 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
             
             with content_col:
-                # 1. Price vs P/E Ratio Plot
-                st.subheader("💎 Valuation Analysis")
-                fig_pe = plot_price_and_pe(stock, hist_plot, ticker_symbol)
-                if fig_pe:
-                    st.plotly_chart(fig_pe, use_container_width=True)
-                else:
-                    st.info("P/E data unavailable.")
+                # 1. Simple Price Plot
+                st.subheader("📈 Price History")
+                fig_price = plot_price_history(hist_plot, ticker_symbol)
+                if fig_price: st.plotly_chart(fig_price, use_container_width=True)
 
-                # 2. Technical Analysis Plot 
-                #[Image of line chart comparing stock performance]
+                # 2. Complex Technical Analysis Plot 
+
+[Image of line chart comparing stock performance]
 
                 st.subheader("📉 Technical Analysis")
                 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD'))
@@ -414,8 +381,14 @@ with compare_tab:
         else:
             raw_data, norm_data, tech_summary = analyze_stock_comparison(final_tickers, period)
             if raw_data is not None:
+                # NEW: Raw Price Chart
+                st.subheader("Price History (USD)")
+                st.line_chart(raw_data)
+
+                # EXISTING: Normalized Performance
                 st.subheader("Performance Chart (Normalized Returns)")
                 st.line_chart(norm_data)
+                
                 if tech_summary:
                     st.subheader("Technical Analysis Snapshot")
                     st.dataframe(pd.DataFrame(tech_summary), use_container_width=True)
@@ -423,15 +396,14 @@ with compare_tab:
 # --- TAB 4: DEEP DIVE ---
 with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
-    st.caption("Analyze Price, Valuation (P/E), Technicals, and Financials.")
+    st.caption("Analyze Price, Technicals, and Financials.")
     
     col_d1, col_d2 = st.columns([2, 2])
     with col_d1:
         dd_ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL):", value="AAPL").upper()
     with col_d2:
         dd_period = st.selectbox("History Period", ["3mo", "6mo", "1y", "2y"], index=2, key="dd_period")
- 
+    
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
         analyze_single_stock_financials(dd_ticker, dd_period)
-
