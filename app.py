@@ -264,8 +264,6 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
 
                 # 2. Complex Technical Analysis Plot 
 
-[Image of line chart comparing stock performance]
-
                 st.subheader("📉 Technical Analysis")
                 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD'))
                 fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
@@ -407,3 +405,4 @@ with deep_dive_tab:
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
         analyze_single_stock_financials(dd_ticker, dd_period)
+
