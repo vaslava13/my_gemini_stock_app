@@ -174,7 +174,7 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
         fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', text=fcf.round(0), textposition='outside', marker_color='teal'), row=2, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="grey", row=2, col=1)
 
-        fig.update_layout(title_text=f'Quarterly Financial Metrics for {ticker_symbol}', height=700, barmode='group', template='plotly_dark', hovermode='x unified')
+        fig.update_layout(title_text=f'Quarterly Financial Metrics for {ticker_symbol}', title_x=0.5, height=700, barmode='group', template='plotly_dark', hovermode='x unified')
         return fig
 
     except Exception as e:
@@ -205,12 +205,13 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['Volume'], name='Volume', marker=dict(color='gray', opacity=0.3)), row=1, col=1, secondary_y=True)
             fig.add_trace(go.Scatter(x=rolling_return.index, y=rolling_return, name='Rolling Ann. Return', line=dict(color='lime')), row=2, col=1)
             fig.add_hline(y=0, line_dash="dash", line_color="grey", row=2, col=1)
-            fig.update_layout(title_text=f'{ticker_symbol} Performance', height=600, template='plotly_dark', showlegend=False)
+            
+            # Update Layout with title centered (title_x=0.5)
+            fig.update_layout(title_text=f'{ticker_symbol} Performance', title_x=0.5, height=600, template='plotly_dark', showlegend=False)
             
             # --- CENTERING LOGIC ---
-            # Create 3 columns: Spacer | Content | Spacer
-            # Ratio 1:6:1 puts the content in the middle 75% of the screen
-            spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
+            # Using [1, 5, 1] creates a balanced center column
+            spacer_left, content_col, spacer_right = st.columns([1, 5, 1])
             
             with content_col:
                 st.plotly_chart(fig, use_container_width=True)
