@@ -4,12 +4,90 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import requests
+import json
+import textwrap
+from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
 from pypfopt import EfficientFrontier, risk_models, expected_returns
 from pypfopt.plotting import plot_efficient_frontier
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
+
+# --- API KEYS (PASTE YOUR KEYS HERE) ---
+# Note: For a deployed app, it is safer to use st.secrets
+NEWS_API_KEY = "30792ed52be642cf8f1a7e4672a86837" 
+GEMINI_API_KEY = "AIzaSyC3pND040DDoR99-rQZjqonXniwIsdAiq0"
+
+# --- HELPER FUNCTIONS (NEWS & AI) ---
+
+def fetch_news_from_api(ticker_symbol, company_name):
+    """Fetches news articles from NewsAPI."""
+    if NEWS_API_KEY == "YOUR_NEWS_API_KEY":
+        return None
+        
+    one_week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    search_query = f'("{ticker_symbol}" OR "{company_name}")'
+    
+    url = (f'https://newsapi.org/v2/everything?'
+           f'q={search_query}&'
+           f'from={one_week_ago}&'
+           f'sortBy=publishedAt&'
+           f'language=en&'
+           f'apiKey={NEWS_API_KEY}')
+    
+    try:
+        response = requests.get(url)
+        if response.status_code != 200: return None
+        data = response.json()
+        return data.get('articles', [])
+    except Exception:
+        return None
+
+def get_gemini_analysis(ticker, news_articles):
+    """Analyzes news using Gemini API."""
+    if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY":
+        return None
+
+    headlines = ""
+    for i, article in enumerate(news_articles[:15]): # Limit to top 15 to save tokens
+        title = article.get('title')
+        url = article.get('url')
+        if title and url:
+            headlines += f"{i+1}. {title} [Source: {url}]\n"
+
+    if not headlines: return None
+
+    system_prompt = textwrap.dedent("""
+        You are a financial analyst. Analyze these news headlines for the company.
+        Return a JSON object with a 'news_analysis' list.
+        For each relevant item found, create an object with:
+        - "category": (Financials, Products, Partnerships, Legal, Sentiment, or Other)
+        - "summary": Brief neutral summary.
+        - "impact": (Positive, Negative, or Neutral)
+        - "source": The source URL.
+        Only include categories that have actual news.
+    """).strip()
+
+    user_query = f"Analyze headlines for {ticker}:\n\n{headlines}"
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    payload = {
+        "contents": [{"parts": [{"text": user_query}]}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "generationConfig": {"responseMimeType": "application/json"}
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'})
+        if response.status_code != 200: return None
+        result = response.json()
+        text_resp = result['candidates'][0]['content']['parts'][0]['text']
+        return json.loads(text_resp)
+    except Exception:
+        return None
 
 # --- HELPER FUNCTIONS (CALCULATIONS) ---
 
@@ -210,22 +288,16 @@ def plot_price_history(hist_df, ticker_symbol):
         return None
 
 def display_fundamental_metrics(stock):
-    """
-    Displays Valuation, Profitability, and Health metrics in a clean layout.
-    """
+    """Displays Valuation, Profitability, and Health metrics."""
     try:
         info = stock.info
-        
-        # Helper to safely get keys
         def get_metric(key, fmt="{:,.2f}", multiplier=1):
             val = info.get(key)
             if val is None: return "N/A"
             return fmt.format(val * multiplier)
 
         st.subheader("🏗️ Fundamental Analysis")
-        st.caption("Key metrics derived from the most recent financial reports.")
-
-        # Row 1: Valuation
+        
         st.markdown("**Valuation**")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Market Cap", get_metric("marketCap", "{:,.0f}"))
@@ -233,7 +305,6 @@ def display_fundamental_metrics(stock):
         c3.metric("Forward P/E", get_metric("forwardPE"))
         c4.metric("Price/Book", get_metric("priceToBook"))
 
-        # Row 2: Profitability
         st.markdown("**Profitability & Health**")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Profit Margin", get_metric("profitMargins", "{:.2f}%", 100))
@@ -241,7 +312,6 @@ def display_fundamental_metrics(stock):
         c3.metric("Debt/Equity", get_metric("debtToEquity"))
         c4.metric("Current Ratio", get_metric("currentRatio"))
 
-        # Row 3: Analyst & Dividends
         st.markdown("**Dividends & Targets**")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Dividend Yield", get_metric("dividendYield", "{:.2f}%", 100))
@@ -250,7 +320,6 @@ def display_fundamental_metrics(stock):
         c4.metric("Analyst Target", get_metric("targetMeanPrice"))
         
         st.divider()
-
     except Exception as e:
         st.warning(f"Could not retrieve fundamental data: {e}")
 
@@ -302,8 +371,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
             
             with content_col:
-                # 1. Simple Price Plot 
-
+                # 1. Simple Price Plot
                 st.subheader("📈 Price History")
                 fig_price = plot_price_history(hist_plot, ticker_symbol)
                 if fig_price: st.plotly_chart(fig_price, use_container_width=True)
@@ -323,7 +391,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                 fig.update_layout(title_text=f'Technical Indicators: {ticker_symbol}', title_x=0.5, height=900, template='plotly_dark', showlegend=False, xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 3. NEW: Fundamental Analysis (Appended)
+                # 3. Fundamental Analysis
                 display_fundamental_metrics(stock)
 
                 # 4. Financial Statements
@@ -344,6 +412,33 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                     st.subheader("📊 Key Financial Metrics")
                     fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
                     if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
+
+                # 5. NEW: AI News Analysis
+                st.subheader(f"📰 AI News Analysis: {ticker_symbol}")
+                st.caption("Using Gemini 2.0 Flash to analyze recent news headlines (Last 7 days).")
+                
+                with st.status("Fetching and analyzing news...", expanded=True) as status:
+                    company_name = stock.info.get('shortName', ticker_symbol)
+                    news_articles = fetch_news_from_api(ticker_symbol, company_name)
+                    
+                    if news_articles:
+                        status.write(f"✅ Found {len(news_articles)} articles. Analyzing with AI...")
+                        analysis = get_gemini_analysis(ticker_symbol, news_articles)
+                        
+                        if analysis and 'news_analysis' in analysis:
+                            status.update(label="Analysis Complete!", state="complete", expanded=False)
+                            
+                            for item in analysis['news_analysis']:
+                                color = "green" if item['impact'] == "Positive" else "red" if item['impact'] == "Negative" else "gray"
+                                with st.expander(f"{item['category']} | :{color}[{item['impact']}]"):
+                                    st.write(item['summary'])
+                                    st.markdown(f"[Read Source]({item['source']})")
+                        else:
+                            status.update(label="AI Analysis Failed", state="error")
+                            st.error("Could not generate analysis.")
+                    else:
+                        status.update(label="No News Found", state="error")
+                        st.warning("No recent news articles found for this stock.")
 
     except Exception as e:
         st.error(f"An error occurred: {e}")
@@ -430,7 +525,6 @@ with compare_tab:
                 st.subheader("Performance Chart (Normalized Returns)")
                 st.line_chart(norm_data)
                 
-                # Raw Price Chart
                 st.subheader("Price History (USD)")
                 st.line_chart(raw_data)
                 
@@ -441,7 +535,7 @@ with compare_tab:
 # --- TAB 4: DEEP DIVE ---
 with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
-    st.caption("Analyze Price, Technicals, Fundamentals, and Financials.")
+    st.caption("Analyze Price, Valuation (P/E), Technicals, and Financials.")
     
     col_d1, col_d2 = st.columns([2, 2])
     with col_d1:
@@ -452,4 +546,3 @@ with deep_dive_tab:
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
         analyze_single_stock_financials(dd_ticker, dd_period)
-
