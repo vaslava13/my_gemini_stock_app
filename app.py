@@ -420,7 +420,7 @@ with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
     st.caption("Analyze Price, Volume, Technical Indicators, and Financials.")
     
-    col_d1, col_d2, col_d3 = st.columns([2, 1, 1])
+    col_d1, col_d2, col_d3 = st.columns([3, 3, 1])
     with col_d1:
         dd_ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL):", value="AAPL").upper()
     with col_d2:
@@ -430,4 +430,5 @@ with deep_dive_tab:
         if st.button("📊 Analyze Company"):
             analyze_single_stock_financials(dd_ticker, dd_period)
 ```
+
 
