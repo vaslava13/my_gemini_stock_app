@@ -16,8 +16,7 @@ from pypfopt.plotting import plot_efficient_frontier
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
 
 # --- API KEYS (PASTE YOUR KEYS HERE) ---
-# Note: For a deployed app, it is safer to use st.secrets
-NEWS_API_KEY = "30792ed52be642cf8f1a7e4672a86837" 
+NEWS_API_KEY = "30792ed52be642cf8f1a7e4672a86837"
 GEMINI_API_KEY = "AIzaSyC3pND040DDoR99-rQZjqonXniwIsdAiq0"
 
 # --- HELPER FUNCTIONS (NEWS & AI) ---
@@ -46,31 +45,54 @@ def fetch_news_from_api(ticker_symbol, company_name):
         return None
 
 def get_gemini_analysis(ticker, news_articles):
-    """Analyzes news using Gemini API."""
+    """Analyzes news using Gemini API with Aggregation."""
     if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY":
         return None
 
     headlines = ""
-    for i, article in enumerate(news_articles[:15]): # Limit to top 15 to save tokens
+    # Limit to top 20 articles to provide enough context for grouping
+    for i, article in enumerate(news_articles[:20]): 
         title = article.get('title')
         url = article.get('url')
         if title and url:
-            headlines += f"{i+1}. {title} [Source: {url}]\n"
+            headlines += f"- {title} [URL: {url}]\n"
 
     if not headlines: return None
 
+    # Updated Prompt for Categorization and Aggregation
     system_prompt = textwrap.dedent("""
-        You are a financial analyst. Analyze these news headlines for the company.
-        Return a JSON object with a 'news_analysis' list.
-        For each relevant item found, create an object with:
-        - "category": (Financials, Products, Partnerships, Legal, Sentiment, or Other)
-        - "summary": Brief neutral summary.
-        - "impact": (Positive, Negative, or Neutral)
-        - "source": The source URL.
-        Only include categories that have actual news.
+        You are a senior financial analyst. Your task is to synthesize news headlines into a structured report.
+        
+        1. Group the provided headlines into these categories: 
+           - Financial Performance
+           - Products & Services
+           - Partnerships & Deals
+           - Legal & Regulatory
+           - Market Sentiment / Analyst Ratings
+           - Other
+        
+        2. For EACH category that contains news:
+           - Determine the overall 'impact' (Positive, Negative, or Neutral).
+           - Write a 'main_message': A concise paragraph summarizing the key theme across all articles in this category.
+           - Create a list of 'articles' containing the 'title' and 'url' for every article used in that category.
+
+        3. Return ONLY a JSON object with the following structure:
+        {
+            "categories": [
+                {
+                    "name": "Category Name",
+                    "impact": "Positive",
+                    "main_message": "Summary of the category...",
+                    "articles": [
+                        {"title": "Headline 1", "url": "http..."},
+                        {"title": "Headline 2", "url": "http..."}
+                    ]
+                }
+            ]
+        }
     """).strip()
 
-    user_query = f"Analyze headlines for {ticker}:\n\n{headlines}"
+    user_query = f"Analyze these news headlines for {ticker}:\n\n{headlines}"
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     
@@ -371,7 +393,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
             
             with content_col:
-                # 1. Simple Price Plot
+                # 1. Simple Price Plot 
                 st.subheader("📈 Price History")
                 fig_price = plot_price_history(hist_plot, ticker_symbol)
                 if fig_price: st.plotly_chart(fig_price, use_container_width=True)
@@ -413,26 +435,34 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                     fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
                     if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
 
-                # 5. NEW: AI News Analysis
-                st.subheader(f"📰 AI News Analysis: {ticker_symbol}")
-                st.caption("Using Gemini 2.0 Flash to analyze recent news headlines (Last 7 days).")
+                # 5. AI News Analysis (Aggregated)
+                st.divider()
+                st.subheader(f"📰 AI-Powered News Analysis: {ticker_symbol}")
+                st.caption("Aggregated news categories, sentiment, and summaries using Gemini 2.0.")
                 
                 with st.status("Fetching and analyzing news...", expanded=True) as status:
                     company_name = stock.info.get('shortName', ticker_symbol)
                     news_articles = fetch_news_from_api(ticker_symbol, company_name)
                     
                     if news_articles:
-                        status.write(f"✅ Found {len(news_articles)} articles. Analyzing with AI...")
+                        status.write(f"✅ Found {len(news_articles)} articles. Analyzing with Gemini...")
                         analysis = get_gemini_analysis(ticker_symbol, news_articles)
                         
-                        if analysis and 'news_analysis' in analysis:
+                        if analysis and 'categories' in analysis:
                             status.update(label="Analysis Complete!", state="complete", expanded=False)
                             
-                            for item in analysis['news_analysis']:
-                                color = "green" if item['impact'] == "Positive" else "red" if item['impact'] == "Negative" else "gray"
-                                with st.expander(f"{item['category']} | :{color}[{item['impact']}]"):
-                                    st.write(item['summary'])
-                                    st.markdown(f"[Read Source]({item['source']})")
+                            for cat in analysis['categories']:
+                                # Define color based on impact
+                                if cat['impact'] == "Positive": color = "green"
+                                elif cat['impact'] == "Negative": color = "red"
+                                else: color = "gray"
+                                
+                                with st.expander(f"{cat['name']} | :{color}[{cat['impact']}]"):
+                                    st.markdown(f"**Summary:** {cat['main_message']}")
+                                    st.markdown("---")
+                                    st.markdown("**Sources:**")
+                                    for art in cat.get('articles', []):
+                                        st.markdown(f"- [{art['title']}]({art['url']})")
                         else:
                             status.update(label="AI Analysis Failed", state="error")
                             st.error("Could not generate analysis.")
