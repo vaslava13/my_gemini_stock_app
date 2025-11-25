@@ -14,22 +14,18 @@ st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
 # --- HELPER FUNCTIONS (CALCULATIONS) ---
 
 def calculate_technical_indicators(df):
-    """
-    Calculates RSI, MACD, and SMAs using standard Pandas.
-    Returns the DataFrame with new columns added.
-    """
-    # 1. Simple Moving Averages
+    """Calculates RSI, MACD, and SMAs."""
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
 
-    # 2. RSI (Relative Strength Index) - 14 periods
+    # RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
 
-    # 3. MACD (12, 26, 9)
+    # MACD
     ema_12 = df['Close'].ewm(span=12, adjust=False).mean()
     ema_26 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = ema_12 - ema_26
@@ -91,7 +87,6 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_d
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        # Plotting
         current_weights_series = pd.Series(current_weights).reindex(df.columns, fill_value=0)
         curr_ret = np.sum(mu * current_weights_series)
         curr_std = np.sqrt(np.dot(current_weights_series.T, np.dot(S, current_weights_series)))
@@ -150,12 +145,10 @@ def display_portfolio_results(tab, name, perf, weights, rebalancing_data):
 # --- HELPER FUNCTIONS (COMPARISON) ---
 
 def analyze_stock_comparison(tickers, period):
-    """Downloads data for comparison and calculates Tech Indicators for summary table."""
+    """Downloads data for comparison and calculates Tech Indicators."""
     try:
         with st.spinner(f"Fetching data for {period}..."):
             df = yf.download(tickers, period=period, progress=False, auto_adjust=True)
-            
-            # Extract Close Prices
             if isinstance(df.columns, pd.MultiIndex):
                 try: df_close = df['Close']
                 except KeyError: df_close = df.xs('Close', level=0, axis=1)
@@ -164,21 +157,17 @@ def analyze_stock_comparison(tickers, period):
 
         if df_close.empty: return None, None, None
         
-        # 1. Normalize for Line Chart
         normalized_df = (df_close / df_close.iloc[0] - 1) * 100
         
-        # 2. Calculate Technical Summary Table
         tech_summary = []
         for ticker in tickers:
             try:
-                # Get specific ticker series
                 if isinstance(df_close, pd.DataFrame) and ticker in df_close.columns:
                     series = df_close[ticker].dropna()
                 else:
-                    series = df_close.squeeze() # Single ticker case
+                    series = df_close.squeeze()
                 
                 if len(series) > 50:
-                    # Calculate simple RSI just for the table
                     delta = series.diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -203,15 +192,56 @@ def analyze_stock_comparison(tickers, period):
                 continue
                 
         return df_close, normalized_df, tech_summary
-
     except Exception as e:
         st.error(f"Error analyzing stocks: {e}")
         return None, None, None
 
-# --- NEW HELPER FUNCTIONS (DEEP DIVE FINANCIALS) ---
+# --- NEW HELPER FUNCTIONS (DEEP DIVE FINANCIALS & P/E) ---
+
+def plot_price_and_pe(stock, hist_df, ticker_symbol):
+    """
+    Plots Price (Left Axis) vs Calculated P/E Ratio (Right Axis).
+    """
+    try:
+        # 1. Get Quarterly EPS
+        income = stock.quarterly_income_stmt
+        if income.empty or 'Basic EPS' not in income.index:
+            return None
+        
+        # Get EPS and sort chronologically
+        eps = income.loc['Basic EPS'].sort_index()
+        ttm_eps = eps.rolling(window=4).sum()
+        
+        # 2. Align TTM EPS with Daily Price Data
+        aligned_eps = ttm_eps.reindex(hist_df.index, method='ffill')
+        
+        # 3. Calculate Daily P/E Ratio
+        pe_series = hist_df['Close'] / aligned_eps
+        
+        # 4. Create Dual Axis Plot
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        fig.add_trace(go.Scatter(x=hist_df.index, y=hist_df['Close'], name='Stock Price', line=dict(color='cyan')), secondary_y=False)
+        fig.add_trace(go.Scatter(x=hist_df.index, y=pe_series, name='P/E Ratio', line=dict(color='orange', dash='dot')), secondary_y=True)
+        
+        fig.update_layout(
+            title_text=f"{ticker_symbol}: Price vs Valuation (P/E)",
+            title_x=0.5,
+            height=600,
+            template="plotly_dark",
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        fig.update_yaxes(title_text="Stock Price ($)", secondary_y=False)
+        fig.update_yaxes(title_text="P/E Ratio", secondary_y=True, showgrid=False)
+        return fig
+        
+    except Exception as e:
+        st.warning(f"Could not calculate P/E History (Data missing): {e}")
+        return None
 
 def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
-    """Plots key financial metrics using Plotly."""
+    """Plots key financial metrics."""
     try:
         income_stmt = income_stmt.iloc[:, :4].iloc[:, ::-1]
         cash_flow = cash_flow.iloc[:, :4].iloc[:, ::-1]
@@ -222,8 +252,7 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
         net_income = income_stmt.loc['Net Income'] / 1e6 if 'Net Income' in income_stmt.index else pd.Series(0, index=dates)
         fcf = cash_flow.loc['Free Cash Flow'] / 1e6 if 'Free Cash Flow' in cash_flow.index else pd.Series(0, index=dates)
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, 
-                            subplot_titles=('Quarterly Income Metrics', 'Quarterly Free Cash Flow'))
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=('Quarterly Income Metrics', 'Quarterly Free Cash Flow'))
 
         fig.add_trace(go.Bar(x=dates, y=revenue, name='Total Revenue', text=revenue.round(0), textposition='outside'), row=1, col=1)
         fig.add_trace(go.Bar(x=dates, y=ebitda, name='EBITDA', text=ebitda.round(0), textposition='outside'), row=1, col=1)
@@ -233,17 +262,15 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
 
         fig.update_layout(title_text=f'Quarterly Financial Metrics for {ticker_symbol}', title_x=0.5, height=700, barmode='group', template='plotly_dark', hovermode='x unified')
         return fig
-    except Exception as e:
+    except Exception:
         return None
 
 def analyze_single_stock_financials(ticker_symbol, period="2y"):
-    """Downloads and displays deep-dive financials + Technical Analysis."""
+    """Downloads and displays deep-dive financials + PE + Technicals."""
     try:
         stock = yf.Ticker(ticker_symbol)
         
-        # 1. Price History & Technicals
         with st.spinner(f"Fetching deep dive data for {ticker_symbol}..."):
-            # Fetch slightly more data to calculate moving averages correctly
             data_period_map = {"3mo": "9mo", "6mo": "1y", "1y": "2y", "2y": "3y"}
             hist = stock.history(period=data_period_map.get(period, "2y"))
             
@@ -251,78 +278,60 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                 st.error(f"Could not download price history for '{ticker_symbol}'.")
                 return
 
-            # --- CALCULATE INDICATORS ---
             hist = calculate_technical_indicators(hist)
-            
-            # Trim to user selection
             if period == "3mo": hist_plot = hist.iloc[-63:]
             elif period == "6mo": hist_plot = hist.iloc[-126:]
             elif period == "1y": hist_plot = hist.iloc[-252:]
             else: hist_plot = hist.iloc[-504:]
 
-            # --- PLOTLY CANDLESTICK + INDICATORS ---
-            fig = make_subplots(
-                rows=3, cols=1, 
-                shared_xaxes=True, 
-                vertical_spacing=0.05, 
-                row_heights=[0.6, 0.2, 0.2],
-                subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD')
-            )
-
-            # Row 1: Candlestick + SMA
-            fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_50'], name='SMA 50', line=dict(color='cyan', width=1)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_200'], name='SMA 200', line=dict(color='orange', width=1)), row=1, col=1)
-
-            # Row 2: RSI
-            fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-
-            # Row 3: MACD
-            fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=3, col=1)
-            fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD'], name='MACD', line=dict(color='blue', width=1)), row=3, col=1)
-            fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD_Signal'], name='Signal', line=dict(color='orange', width=1)), row=3, col=1)
-
-            # Layout updates
-            fig.update_layout(title_text=f'Technical Analysis: {ticker_symbol}', title_x=0.5, height=900, template='plotly_dark', showlegend=False, xaxis_rangeslider_visible=False)
-            
             # --- CENTERING LOGIC ---
             spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
             
             with content_col:
+                # 1. Price vs P/E Ratio Plot
+                st.subheader("💎 Valuation Analysis")
+                fig_pe = plot_price_and_pe(stock, hist_plot, ticker_symbol)
+                if fig_pe:
+                    st.plotly_chart(fig_pe, use_container_width=True)
+                else:
+                    st.info("P/E data unavailable.")
+
+                # 2. Technical Analysis Plot 
+
+[Image of line chart comparing stock performance]
+
+                st.subheader("📉 Technical Analysis")
+                fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD'))
+                fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_50'], name='SMA 50', line=dict(color='cyan', width=1)), row=1, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_200'], name='SMA 200', line=dict(color='orange', width=1)), row=1, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+                fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=3, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD'], name='MACD', line=dict(color='blue', width=1)), row=3, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD_Signal'], name='Signal', line=dict(color='orange', width=1)), row=3, col=1)
+                fig.update_layout(title_text=f'Technical Indicators: {ticker_symbol}', title_x=0.5, height=900, template='plotly_dark', showlegend=False, xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 2. Financial Statements
+                # 3. Financial Statements
                 st.subheader("📑 Financial Statements")
-                
                 income_stmt = stock.quarterly_income_stmt
                 balance_sheet = stock.quarterly_balance_sheet
                 cash_flow = stock.quarterly_cashflow
 
                 tab_f1, tab_f2, tab_f3 = st.tabs(["Income Statement", "Balance Sheet", "Cash Flow"])
-                
                 with tab_f1:
-                    if not income_stmt.empty:
-                        st.dataframe((income_stmt / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
-                    else:
-                        st.info("Income statement not available.")
+                    if not income_stmt.empty: st.dataframe((income_stmt / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
                 with tab_f2:
-                    if not balance_sheet.empty:
-                        st.dataframe((balance_sheet / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
-                    else:
-                        st.info("Balance sheet not available.")
+                    if not balance_sheet.empty: st.dataframe((balance_sheet / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
                 with tab_f3:
-                    if not cash_flow.empty:
-                        st.dataframe((cash_flow / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
-                    else:
-                        st.info("Cash flow statement not available.")
+                    if not cash_flow.empty: st.dataframe((cash_flow / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
 
                 if not income_stmt.empty and not cash_flow.empty:
                     st.subheader("📊 Key Financial Metrics")
                     fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
-                    if fig_metrics:
-                        st.plotly_chart(fig_metrics, use_container_width=True)
+                    if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
 
     except Exception as e:
         st.error(f"An error occurred: {e}")
@@ -391,7 +400,7 @@ with results_tab:
 # --- TAB 3: COMPARISON ---
 with compare_tab:
     st.header("Compare Stock Performance")
-    c1, c2 = st.columns([2, 2])
+    c1, c2 = st.columns([3, 1])
     with c1:
         default_tickers = [t for t in st.session_state.portfolio_data["Ticker"].unique() if t]
         selected_tickers = st.multiselect("Select portfolio stocks:", default_tickers, default=default_tickers[:3])
@@ -408,27 +417,21 @@ with compare_tab:
             if raw_data is not None:
                 st.subheader("Performance Chart (Normalized Returns)")
                 st.line_chart(norm_data)
-                
-                st.subheader("Technical Analysis Snapshot")
                 if tech_summary:
+                    st.subheader("Technical Analysis Snapshot")
                     st.dataframe(pd.DataFrame(tech_summary), use_container_width=True)
-                else:
-                    st.warning("Not enough data to calculate technical indicators for these stocks.")
 
 # --- TAB 4: DEEP DIVE ---
 with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
-    st.caption("Analyze Price, Volume, Technical Indicators, and Financials.")
+    st.caption("Analyze Price, Valuation (P/E), Technicals, and Financials.")
     
-    col_d1, col_d2 = st.columns([2, 2])
+    col_d1, col_d2, col_d3 = st.columns([2, 1, 1])
     with col_d1:
         dd_ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL):", value="AAPL").upper()
     with col_d2:
         dd_period = st.selectbox("History Period", ["3mo", "6mo", "1y", "2y"], index=2, key="dd_period")
-
-    st.write("") # Spacer
-    if st.button("📊 Analyze Company"):
-        analyze_single_stock_financials(dd_ticker, dd_period)
-
-
-
+    with col_d3:
+        st.write("") # Spacer
+        if st.button("📊 Analyze Company"):
+            analyze_single_stock_financials(dd_ticker, dd_period)
