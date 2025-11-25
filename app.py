@@ -209,6 +209,51 @@ def plot_price_history(hist_df, ticker_symbol):
         st.warning(f"Could not plot price history: {e}")
         return None
 
+def display_fundamental_metrics(stock):
+    """
+    Displays Valuation, Profitability, and Health metrics in a clean layout.
+    """
+    try:
+        info = stock.info
+        
+        # Helper to safely get keys
+        def get_metric(key, fmt="{:,.2f}", multiplier=1):
+            val = info.get(key)
+            if val is None: return "N/A"
+            return fmt.format(val * multiplier)
+
+        st.subheader("🏗️ Fundamental Analysis")
+        st.caption("Key metrics derived from the most recent financial reports.")
+
+        # Row 1: Valuation
+        st.markdown("**Valuation**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Market Cap", get_metric("marketCap", "{:,.0f}"))
+        c2.metric("Trailing P/E", get_metric("trailingPE"))
+        c3.metric("Forward P/E", get_metric("forwardPE"))
+        c4.metric("Price/Book", get_metric("priceToBook"))
+
+        # Row 2: Profitability
+        st.markdown("**Profitability & Health**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Profit Margin", get_metric("profitMargins", "{:.2f}%", 100))
+        c2.metric("Return on Equity", get_metric("returnOnEquity", "{:.2f}%", 100))
+        c3.metric("Debt/Equity", get_metric("debtToEquity"))
+        c4.metric("Current Ratio", get_metric("currentRatio"))
+
+        # Row 3: Analyst & Dividends
+        st.markdown("**Dividends & Targets**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Dividend Yield", get_metric("dividendYield", "{:.2f}%", 100))
+        c2.metric("52W High", get_metric("fiftyTwoWeekHigh"))
+        c3.metric("52W Low", get_metric("fiftyTwoWeekLow"))
+        c4.metric("Analyst Target", get_metric("targetMeanPrice"))
+        
+        st.divider()
+
+    except Exception as e:
+        st.warning(f"Could not retrieve fundamental data: {e}")
+
 def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
     """Plots key financial metrics."""
     try:
@@ -257,13 +302,15 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
             
             with content_col:
-                # 1. Simple Price Plot
+                # 1. Simple Price Plot 
+
+[Image of line chart comparing stock performance]
+
                 st.subheader("📈 Price History")
                 fig_price = plot_price_history(hist_plot, ticker_symbol)
                 if fig_price: st.plotly_chart(fig_price, use_container_width=True)
 
-                # 2. Complex Technical Analysis Plot 
-
+                # 2. Complex Technical Analysis Plot
                 st.subheader("📉 Technical Analysis")
                 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD'))
                 fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
@@ -278,7 +325,10 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                 fig.update_layout(title_text=f'Technical Indicators: {ticker_symbol}', title_x=0.5, height=900, template='plotly_dark', showlegend=False, xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 3. Financial Statements
+                # 3. NEW: Fundamental Analysis (Appended)
+                display_fundamental_metrics(stock)
+
+                # 4. Financial Statements
                 st.subheader("📑 Financial Statements")
                 income_stmt = stock.quarterly_income_stmt
                 balance_sheet = stock.quarterly_balance_sheet
@@ -379,13 +429,12 @@ with compare_tab:
         else:
             raw_data, norm_data, tech_summary = analyze_stock_comparison(final_tickers, period)
             if raw_data is not None:
-                # NEW: Raw Price Chart
-                st.subheader("Price History (USD)")
-                st.line_chart(raw_data)
-
-                # EXISTING: Normalized Performance
                 st.subheader("Performance Chart (Normalized Returns)")
                 st.line_chart(norm_data)
+                
+                # Raw Price Chart
+                st.subheader("Price History (USD)")
+                st.line_chart(raw_data)
                 
                 if tech_summary:
                     st.subheader("Technical Analysis Snapshot")
@@ -394,15 +443,14 @@ with compare_tab:
 # --- TAB 4: DEEP DIVE ---
 with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
-    st.caption("Analyze Price, Technicals, and Financials.")
+    st.caption("Analyze Price, Technicals, Fundamentals, and Financials.")
     
     col_d1, col_d2 = st.columns([2, 2])
     with col_d1:
         dd_ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL):", value="AAPL").upper()
     with col_d2:
         dd_period = st.selectbox("History Period", ["3mo", "6mo", "1y", "2y"], index=2, key="dd_period")
-    
+
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
         analyze_single_stock_financials(dd_ticker, dd_period)
-
