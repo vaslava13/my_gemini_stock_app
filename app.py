@@ -391,7 +391,7 @@ with results_tab:
 # --- TAB 3: COMPARISON ---
 with compare_tab:
     st.header("Compare Stock Performance")
-    c1, c2 = st.columns([3, 1])
+    c1, c2 = st.columns([2, 2])
     with c1:
         default_tickers = [t for t in st.session_state.portfolio_data["Ticker"].unique() if t]
         selected_tickers = st.multiselect("Select portfolio stocks:", default_tickers, default=default_tickers[:3])
@@ -420,13 +420,15 @@ with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
     st.caption("Analyze Price, Volume, Technical Indicators, and Financials.")
     
-    col_d1, col_d2 = st.columns([3, 1])
+    col_d1, col_d2 = st.columns([2, 2])
     with col_d1:
         dd_ticker = st.text_input("Enter Ticker Symbol (e.g., AAPL):", value="AAPL").upper()
-        dd_period = st.selectbox("History Period", ["3mo", "6mo", "1y", "2y"], index=2, key="dd_period")
     with col_d2:
-        st.write("") # Spacer
-        if st.button("📊 Analyze Company"):
-            analyze_single_stock_financials(dd_ticker, dd_period)
+        dd_period = st.selectbox("History Period", ["3mo", "6mo", "1y", "2y"], index=2, key="dd_period")
+
+    st.write("") # Spacer
+    if st.button("📊 Analyze Company"):
+        analyze_single_stock_financials(dd_ticker, dd_period)
+
 
 
