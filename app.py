@@ -275,8 +275,6 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
 
             # 1. Price Chart 
 
-[Image of line chart comparing stock performance]
-
             fig_price = go.Figure()
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], name='Price', line=dict(color='cyan')))
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['SMA_50'], name='SMA 50', line=dict(color='orange', width=1)))
