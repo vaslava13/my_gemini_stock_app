@@ -16,6 +16,13 @@ from pypfopt.plotting import plot_efficient_frontier
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
 
 # --- API KEYS (PASTE YOUR KEYS HERE) ---
+# Securely load keys
+try:
+    NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except (FileNotFoundError, KeyError):
+    st.error("Secrets not found. Please add them to .streamlit/secrets.toml (local) or Streamlit Cloud Secrets.")
+    st.stop()
 
 # --- HELPER FUNCTIONS (NEWS & AI) ---
 
