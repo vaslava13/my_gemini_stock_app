@@ -481,13 +481,8 @@ with compare_tab:
                 st.subheader("Performance (%)")
                 st.line_chart(norm_p) # Native Streamlit Chart 
 
-[Image of line chart comparing stock performance]
-
                 st.subheader("Price ($)")
                 st.line_chart(raw_p) # Native Streamlit Chart 
-
-[Image of line chart comparing stock performance]
-
 
 with deep_dive_tab:
     c1, c2 = st.columns([2, 1])
