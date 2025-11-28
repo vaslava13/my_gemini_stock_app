@@ -24,19 +24,6 @@ except (FileNotFoundError, KeyError):
     NEWS_API_KEY = None
     GEMINI_API_KEY = None
 
-# --- MOBILE CHART HELPER (DEEP DIVE ONLY) ---
-def make_mobile_chart(fig, height=500, title=None):
-    if title: fig.update_layout(title=title)
-    fig.update_layout(
-        height=height,
-        template="plotly_dark",
-        margin=dict(l=10, r=10, t=50, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-        dragmode='pan',
-        hovermode="x unified"
-    )
-    return fig
-
 # --- HELPER FUNCTIONS (NEWS & AI) ---
 
 def fetch_news_from_api(ticker_symbol, company_name):
@@ -90,79 +77,115 @@ def calculate_technical_indicators(df):
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
     return df
 
+def calculate_dcf(info):
+    """
+    Calculates Intrinsic Value using Discounted Cash Flow (5Y Projection).
+    """
+    try:
+        # 1. Inputs & Assumptions
+        fcf = info.get('freeCashflow') # Look for raw FCF
+        if not fcf:
+            # Fallback: Operating Cash Flow - CapEx (Approx)
+            ocf = info.get('operatingCashflow')
+            # CapEx isn't always in 'info', we stick to fcf if available or fail safely
+            if not ocf: return None, "Missing Cash Flow Data"
+            fcf = ocf * 0.85 # Crude approx if CapEx missing
+
+        shares = info.get('sharesOutstanding')
+        beta = info.get('beta', 1.1) # Default to 1.1 if missing
+        growth_rate = info.get('earningsGrowth', 0.10) # Default expectation
+        
+        if not shares or shares == 0: return None, "Missing Shares Data"
+
+        # Conservative Growth Cap (Max 20% for calculation safety)
+        growth_rate = min(growth_rate, 0.20)
+        
+        # WACC / Discount Rate Estimation (CAPM)
+        risk_free = 0.042 # 4.2% Treasury
+        market_prem = 0.05 # 5% Equity Premium
+        discount_rate = risk_free + (beta * market_prem)
+
+        # 2. Project 5 Years
+        future_cash_flows = []
+        projected_fcf = fcf
+        for i in range(1, 6):
+            projected_fcf = projected_fcf * (1 + growth_rate)
+            future_cash_flows.append(projected_fcf)
+
+        # 3. Terminal Value (Perpetual Growth 2.5%)
+        terminal_growth = 0.025
+        terminal_val = future_cash_flows[-1] * (1 + terminal_growth) / (discount_rate - terminal_growth)
+
+        # 4. Discount to Present
+        dcf_value = 0
+        for i, val in enumerate(future_cash_flows):
+            dcf_value += val / ((1 + discount_rate) ** (i + 1))
+        
+        dcf_value += terminal_val / ((1 + discount_rate) ** 5)
+
+        # 5. Per Share
+        intrinsic_value = dcf_value / shares
+        
+        return intrinsic_value, {
+            "Growth Rate": f"{growth_rate:.1%}",
+            "Discount Rate": f"{discount_rate:.1%}",
+            "Shares": f"{shares/1e9:.2f}B",
+            "Starting FCF": f"${fcf/1e9:.2f}B"
+        }
+
+    except Exception as e:
+        return None, str(e)
+
 def display_valuation_models(info):
-    """
-    Calculates and displays intrinsic value with detailed breakdowns.
-    """
-    st.subheader("💎 Valuation & Intrinsic Value")
+    """Displays DCF, Graham, and Lynch models."""
+    st.subheader("💎 Intrinsic Value Analysis")
     
     try:
         curr_price = info.get('currentPrice', 0)
         eps = info.get('trailingEps')
         book_val = info.get('bookValue')
-        growth_raw = info.get('earningsGrowth', 0) # e.g. 0.15
+        growth_raw = info.get('earningsGrowth', 0)
         
-        # --- MODEL 1: GRAHAM NUMBER ---
-        st.markdown("##### 1. Benjamin Graham Number (Value)")
-        graham_val = 0
+        # --- 1. DCF Model ---
+        dcf_val, dcf_details = calculate_dcf(info)
+        
+        col_main, col_detail = st.columns([1, 2])
+        if dcf_val:
+            delta_dcf = ((dcf_val - curr_price) / curr_price) * 100
+            col_main.metric("DCF Fair Value", f"${dcf_val:.2f}", f"{delta_dcf:.1f}%")
+            with col_detail.expander("See DCF Assumptions"):
+                st.write(dcf_details)
+                st.caption("Method: 5-Year FCF Projection + Terminal Value (2.5% growth). Discounted using CAPM.")
+        else:
+            col_main.info("DCF Unavailable (Missing Cash Flow data)")
+
+        st.divider()
+        
+        # --- 2. Graham & Lynch ---
+        c1, c2 = st.columns(2)
+        
+        # Graham
         if eps and book_val and eps > 0 and book_val > 0:
             graham_val = math.sqrt(22.5 * eps * book_val)
-            delta = ((graham_val - curr_price) / curr_price) * 100
-            color = "green" if delta > 0 else "red"
-            
-            c1, c2 = st.columns([1, 3])
-            c1.metric("Graham Value", f"${graham_val:.2f}", f"{delta:.1f}%")
-            
-            with c2.expander("Show Calculation & Assumptions"):
-                st.markdown(f"""
-                **Formula:** $\sqrt{{22.5 \\times EPS \\times BookValue}}$
-                
-                *This classic formula by the 'Father of Value Investing' finds the maximum fair price for a defensive stock.*
-                
-                **Your Data:**
-                - Trailing EPS: `${eps}`
-                - Book Value per Share: `${book_val}`
-                - Constant: `22.5` (Assumes P/E of 15 and P/B of 1.5)
-                
-                **Calculation:** $\sqrt{{22.5 \\times {eps} \\times {book_val}}} = \mathbf{{\${graham_val:.2f}}}$
-                """)
-        else:
-            st.info("Cannot calculate Graham Number: Negative Earnings or Book Value.")
+            delta_g = ((graham_val - curr_price) / curr_price) * 100
+            c1.metric("Graham Number (Value)", f"${graham_val:.2f}", f"{delta_g:.1f}%")
+        else: c1.caption("Graham Number N/A")
 
-        # --- MODEL 2: PETER LYNCH FAIR VALUE ---
-        st.markdown("##### 2. Peter Lynch Fair Value (Growth)")
-        lynch_val = 0
+        # Lynch
         if eps and growth_raw and eps > 0:
-            growth_rate = growth_raw * 100
-            # Cap growth at 25% to be conservative, floor at 5%
-            adj_growth = max(min(growth_rate, 25), 5)
-            
-            lynch_val = eps * adj_growth
+            # Lynch Fair Value = EPS * GrowthRate (PEG=1 logic)
+            # Cap growth at 25 for safety
+            lynch_val = eps * min(growth_raw * 100, 25)
             delta_l = ((lynch_val - curr_price) / curr_price) * 100
-            
-            c1, c2 = st.columns([1, 3])
-            c1.metric("Lynch Value", f"${lynch_val:.2f}", f"{delta_l:.1f}%")
-            
-            with c2.expander("Show Calculation & Assumptions"):
-                st.markdown(f"""
-                **Formula:** $EPS \\times GrowthRate$
-                
-                *Peter Lynch (Magellan Fund) famously looked for a PEG ratio of 1. This implies a stock is fairly valued when its P/E equals its Growth Rate.*
-                
-                **Your Data:**
-                - Trailing EPS: `${eps}`
-                - Earnings Growth (Yearly): `{growth_rate:.1f}%`
-                - Adjusted Growth Cap: `{adj_growth:.1f}` (We cap at 25% for safety)
-                
-                **Calculation:** ${eps} \\times {adj_growth:.1f} = \mathbf{{\${lynch_val:.2f}}}$
-                """)
-        else:
-            st.info("Cannot calculate Lynch Value: Missing or negative growth data.")
-            
+            c2.metric("Lynch Fair Value (Growth)", f"${lynch_val:.2f}", f"{delta_l:.1f}%")
+        else: c2.caption("Lynch Value N/A")
+        
         st.divider()
 
     except Exception as e:
-        st.warning(f"Could not calculate valuation metrics: {e}")
+        st.warning(f"Valuation error: {e}")
+
+# --- OPTIMIZATION ENGINE ---
 
 def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
     try:
@@ -207,7 +230,8 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
 
         # --- PLOTTING (Classic Matplotlib - Mobile Optimized) ---
         plt.rcParams.update({'font.size': 14, 'axes.labelsize': 14, 'axes.titlesize': 16, 'legend.fontsize': 12})
-        fig, ax = plt.subplots(figsize=(8, 8)) # Square aspect ratio
+        # Square aspect ratio for phones
+        fig, ax = plt.subplots(figsize=(8, 8)) 
         plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
         
         scenarios = [('low_risk', 'Lowest Risk', 'green', 'o'), ('medium_risk', 'Max Sharpe', 'blue', '*'), ('high_risk', 'High Risk', 'red', 'X')]
@@ -220,6 +244,7 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
         curr_std = np.sqrt(np.dot(curr_series.T, np.dot(S, curr_series)))
         ax.scatter(curr_std, curr_ret, marker='D', s=200, c='yellow', edgecolors='black', label='Current', zorder=5)
 
+        # Legend BELOW the chart
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=2)
         ax.set_title("Efficient Frontier", pad=20)
         plt.tight_layout()
@@ -247,7 +272,9 @@ def display_portfolio_results(tab, name, perf, weights, rebal_data):
         c2.metric("Risk", f"{perf[1]*100:.1f}%")
         c3.metric("Sharpe", f"{perf[2]:.2f}")
         
+        # Native Streamlit Chart (Old Style)
         active_w = {k: v*100 for k, v in weights.items() if v > 0.001}
+        st.caption("Recommended Allocation (%)")
         st.bar_chart(pd.DataFrame.from_dict(active_w, orient='index', columns=['Weight']))
         
         if rebal_data: st.dataframe(pd.DataFrame(rebal_data), use_container_width=True)
@@ -307,17 +334,21 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
         net = income_stmt.loc['Net Income'] / 1e6 if 'Net Income' in income_stmt.index else pd.Series(0, index=dates)
         fcf = cash_flow.loc['Free Cash Flow'] / 1e6 if 'Free Cash Flow' in cash_flow.index else pd.Series(0, index=dates)
 
+        # Plotly for Financials (Better than Matplotlib for Bars)
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=('Revenue & Net Income', 'Free Cash Flow'))
         fig.add_trace(go.Bar(x=dates, y=rev, name='Revenue'), row=1, col=1)
         fig.add_trace(go.Bar(x=dates, y=net, name='Net Income'), row=1, col=1)
         fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', marker_color='teal'), row=2, col=1)
         
-        fig = make_mobile_chart(fig, height=600, title=f'Financials (M USD): {ticker_symbol}')
+        # Mobile Config
+        fig.update_layout(height=600, template="plotly_dark", margin=dict(l=10, r=10, t=50, b=10),
+                          legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                          dragmode='pan', hovermode="x unified", title=f'Financials (M USD): {ticker_symbol}')
         return fig
     except: return None
 
 def analyze_single_stock_financials(ticker_symbol, period="2y"):
-    """Deep Dive with Technicals, Financials, Valuation, and News."""
+    """Deep Dive with Technicals, Financials, Valuation (DCF), and News."""
     try:
         stock = yf.Ticker(ticker_symbol)
         with st.spinner(f"Analyzing {ticker_symbol}..."):
@@ -330,20 +361,19 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             start_idx = -63 if period == "3mo" else -252 if period == "1y" else -504
             plot_df = hist.iloc[start_idx:]
 
-            # 1. Price Chart
+            # 1. Price Chart (Plotly for Pan/Zoom)
             fig_price = go.Figure()
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], name='Price', line=dict(color='cyan')))
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['SMA_50'], name='SMA 50', line=dict(color='orange')))
-            fig_price = make_mobile_chart(fig_price, title=f"{ticker_symbol} Price", height=400)
+            fig_price.update_layout(title=f"{ticker_symbol} Price", height=400, template="plotly_dark", 
+                                    margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", y=-0.2), dragmode='pan')
             st.plotly_chart(fig_price, use_container_width=True)
 
-            # 2. Fundamentals
+            # 2. Fundamentals & NEW DCF VALUATION
             display_fundamental_metrics(stock)
-            
-            # --- NEW: VALUATION MODELS ---
             display_valuation_models(stock.info)
 
-            # 3. Technicals
+            # 3. Technicals (Plotly)
             st.subheader("📉 Technical Analysis")
             fig_tech = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5], vertical_spacing=0.05)
             fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI'], name='RSI', line=dict(color='purple')), row=1, col=1)
@@ -351,7 +381,8 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             fig_tech.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
             fig_tech.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD'), row=2, col=1)
             fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MACD'], name='MACD Line', line=dict(color='blue')), row=2, col=1)
-            fig_tech = make_mobile_chart(fig_tech, height=500)
+            fig_tech.update_layout(height=500, template="plotly_dark", margin=dict(l=10, r=10, t=40, b=10), 
+                                   legend=dict(orientation="h", y=-0.2), dragmode='pan')
             st.plotly_chart(fig_tech, use_container_width=True)
 
             # 4. Financials
@@ -421,7 +452,10 @@ with results_tab:
     if 'results' in st.session_state:
         portfolios, total_val, prices, fig = st.session_state.results
         st.metric("Portfolio Value", f"${total_val:,.2f}")
+        
+        # Display Classic Matplotlib Chart (Mobile Friendly)
         st.pyplot(fig, use_container_width=True)
+        
         t1, t2, t3 = st.tabs(["🛡️ Low", "⚖️ Mid", "🚀 High"])
         scenarios = [(t1, 'low_risk', "Low Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
         for tab, key, name in scenarios:
@@ -445,9 +479,15 @@ with compare_tab:
             raw_p, norm_p, _ = analyze_stock_comparison(final, per)
             if norm_p is not None:
                 st.subheader("Performance (%)")
-                st.line_chart(norm_p)
+                st.line_chart(norm_p) # Native Streamlit Chart 
+
+[Image of line chart comparing stock performance]
+
                 st.subheader("Price ($)")
-                st.line_chart(raw_p)
+                st.line_chart(raw_p) # Native Streamlit Chart 
+
+[Image of line chart comparing stock performance]
+
 
 with deep_dive_tab:
     c1, c2 = st.columns([2, 1])
