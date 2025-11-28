@@ -7,7 +7,6 @@ import plotly.graph_objects as go
 import requests
 import json
 import textwrap
-import math
 from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
 from pypfopt import EfficientFrontier, risk_models, expected_returns
@@ -24,16 +23,25 @@ except (FileNotFoundError, KeyError):
     NEWS_API_KEY = None
     GEMINI_API_KEY = None
 
-# --- MOBILE CHART HELPER ---
+# --- MOBILE CHART HELPER (FOR PLOTLY) ---
 def make_mobile_chart(fig, height=500, title=None):
-    """Optimizes Plotly charts for mobile viewing."""
+    """
+    Optimizes Plotly charts for mobile:
+    - Pan instead of Zoom
+    - Bottom Legend
+    - Tight margins
+    """
     if title: fig.update_layout(title=title)
     fig.update_layout(
         height=height,
         template="plotly_dark",
         margin=dict(l=10, r=10, t=50, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-        dragmode='pan',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=-0.2, # Legend below chart
+            xanchor="center", x=0.5
+        ),
+        dragmode='pan', # Crucial for mobile scrolling
         hovermode="x unified"
     )
     return fig
@@ -41,6 +49,7 @@ def make_mobile_chart(fig, height=500, title=None):
 # --- HELPER FUNCTIONS (NEWS & AI) ---
 
 def fetch_news_from_api(ticker_symbol, company_name):
+    """Fetches news articles from NewsAPI."""
     if not NEWS_API_KEY: return None
     one_week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
     search_query = f'("{ticker_symbol}" OR "{company_name}")'
@@ -51,6 +60,7 @@ def fetch_news_from_api(ticker_symbol, company_name):
     except: return None
 
 def get_gemini_analysis(ticker, news_articles):
+    """Analyzes news using Gemini API."""
     if not GEMINI_API_KEY: return None
     headlines = ""
     for article in news_articles[:15]:
@@ -74,9 +84,10 @@ def get_gemini_analysis(ticker, news_articles):
         return json.loads(resp.json()['candidates'][0]['content']['parts'][0]['text']) if resp.status_code == 200 else None
     except: return None
 
-# --- HELPER FUNCTIONS (CALCULATIONS & VALUATION) ---
+# --- HELPER FUNCTIONS (CALCULATIONS) ---
 
 def calculate_technical_indicators(df):
+    """Calculates RSI, MACD, and SMAs."""
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     delta = df['Close'].diff()
@@ -90,36 +101,6 @@ def calculate_technical_indicators(df):
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
     return df
-
-def calculate_intrinsic_value(stock_info):
-    """
-    Calculates Intrinsic Value using Graham Number and Lynch Fair Value.
-    """
-    try:
-        current_price = stock_info.get('currentPrice', 0)
-        eps = stock_info.get('trailingEps')
-        book_value = stock_info.get('bookValue')
-        growth_rate = stock_info.get('earningsGrowth', 0) # 0.15 for 15%
-        
-        # 1. Benjamin Graham Number (Value Stock Focus)
-        # Formula: Sqrt(22.5 * EPS * Book Value)
-        graham_number = None
-        if eps and book_value and eps > 0 and book_value > 0:
-            graham_number = math.sqrt(22.5 * eps * book_value)
-
-        # 2. Peter Lynch Fair Value (Growth Stock Focus)
-        # Formula: PEG = 1 is fair. So Fair P/E = Growth Rate. Value = EPS * Growth * 100
-        # We adjust slightly: Fair Value = EPS * (Growth Rate * 100)
-        lynch_value = None
-        if eps and growth_rate and eps > 0 and growth_rate > 0:
-            # We cap growth at 25% to prevent unrealistic valuations for explosive startups
-            capped_growth = min(growth_rate * 100, 25) 
-            # Lynch usually adds Dividend Yield to growth, we'll keep it simple for now
-            lynch_value = eps * capped_growth
-
-        return current_price, graham_number, lynch_value
-    except Exception as e:
-        return 0, None, None
 
 def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
     try:
@@ -163,20 +144,27 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
             portfolios['high_risk'] = portfolios['medium_risk']
 
         # --- PLOTTING (Classic Matplotlib - Mobile Optimized) ---
+        
+        # Increase font sizes for mobile readability
         plt.rcParams.update({'font.size': 14, 'axes.labelsize': 14, 'axes.titlesize': 16, 'legend.fontsize': 12})
+        
+        # Use Square Ratio (8x8) for mobile
         fig, ax = plt.subplots(figsize=(8, 8))
         plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
         
+        # Markers
         scenarios = [('low_risk', 'Lowest Risk', 'green', 'o'), ('medium_risk', 'Max Sharpe', 'blue', '*'), ('high_risk', 'High Risk', 'red', 'X')]
         for key, label, color, marker in scenarios:
             r, v, _ = portfolios[key]['performance']
             ax.scatter(v, r, marker=marker, s=200, c=color, label=label, zorder=5)
         
+        # Current
         curr_series = pd.Series(current_weights).reindex(df.columns, fill_value=0)
         curr_ret = np.sum(mu * curr_series)
         curr_std = np.sqrt(np.dot(curr_series.T, np.dot(S, curr_series)))
         ax.scatter(curr_std, curr_ret, marker='D', s=200, c='yellow', edgecolors='black', label='Current', zorder=5)
 
+        # Legend below chart
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=2)
         ax.set_title("Efficient Frontier", pad=20)
         plt.tight_layout()
@@ -222,6 +210,7 @@ def analyze_stock_comparison(tickers, period):
             else: df_close = df[['Close']] if 'Close' in df.columns else df
 
         if df_close.empty: return None, None, None
+        
         norm_df = (df_close / df_close.iloc[0] - 1) * 100
         
         tech_summary = []
@@ -238,6 +227,7 @@ def analyze_stock_comparison(tickers, period):
     except: return None, None, None
 
 def display_fundamental_metrics(stock):
+    """Displays Valuation, Profitability, and Health metrics."""
     try:
         info = stock.info
         def get_metric(key, fmt="{:,.2f}", multiplier=1):
@@ -254,33 +244,8 @@ def display_fundamental_metrics(stock):
         st.divider()
     except: st.warning("Fundamental data unavailable.")
 
-def display_intrinsic_value(stock_info, ticker_symbol):
-    """Calculates and displays Intrinsic Value cards."""
-    st.subheader("💎 Intrinsic Value & Fair Price")
-    
-    curr, graham, lynch = calculate_intrinsic_value(stock_info)
-    
-    if curr > 0:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Current Price", f"${curr:,.2f}")
-        
-        if graham:
-            delta = ((graham - curr) / curr) * 100
-            color = "normal" if delta < 0 else "inverse" # Streamlit handles color by delta sign usually, but we'll use delta
-            c2.metric("Graham Number (Value)", f"${graham:,.2f}", f"{delta:.1f}%")
-            st.caption(f"Based on Assets & Earnings. Best for stable value stocks like Banks/Utilities.")
-        else:
-            c2.info("Graham Number N/A (Negative Earnings/Book)")
-
-        if lynch:
-            delta = ((lynch - curr) / curr) * 100
-            c3.metric("Lynch Fair Value (Growth)", f"${lynch:,.2f}", f"{delta:.1f}%")
-            st.caption(f"Based on PEG Ratio. Assumes Fair P/E = Growth Rate. Best for Growth stocks.")
-        else:
-            c3.info("Lynch Value N/A (Missing Growth Data)")
-    st.divider()
-
 def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
+    """Plots key financial metrics."""
     try:
         income_stmt = income_stmt.iloc[:, :4].iloc[:, ::-1]
         cash_flow = cash_flow.iloc[:, :4].iloc[:, ::-1]
@@ -294,16 +259,18 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
         fig.add_trace(go.Bar(x=dates, y=rev, name='Revenue'), row=1, col=1)
         fig.add_trace(go.Bar(x=dates, y=net, name='Net Income'), row=1, col=1)
         fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', marker_color='teal'), row=2, col=1)
+        
+        # Mobile config
         fig = make_mobile_chart(fig, height=600, title=f'Financials (M USD): {ticker_symbol}')
         return fig
     except: return None
 
 def analyze_single_stock_financials(ticker_symbol, period="2y"):
-    """Deep Dive with Technicals, Financials, Valuation, and News."""
+    """Deep Dive with Technicals, Financials, and News."""
     try:
         stock = yf.Ticker(ticker_symbol)
         with st.spinner(f"Analyzing {ticker_symbol}..."):
-            hist = stock.history(period="2y")
+            hist = stock.history(period="2y") # Default fetch
             if hist.empty: 
                 st.error("No data found.")
                 return
@@ -312,29 +279,30 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             start_idx = -63 if period == "3mo" else -252 if period == "1y" else -504
             plot_df = hist.iloc[start_idx:]
 
-            # 1. Price Chart
+            # 1. Price Chart (Interactive & Mobile Friendly)
             fig_price = go.Figure()
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], name='Price', line=dict(color='cyan')))
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['SMA_50'], name='SMA 50', line=dict(color='orange', width=1)))
             fig_price = make_mobile_chart(fig_price, title=f"{ticker_symbol} Price", height=400)
             st.plotly_chart(fig_price, use_container_width=True)
 
-            # 2. Fundamentals & Valuation (NEW SECTION)
+            # 2. Fundamentals
             display_fundamental_metrics(stock)
-            display_intrinsic_value(stock.info, ticker_symbol)
 
-            # 3. Technicals
-            st.subheader("📉 Technical Analysis")
+            # 3. Advanced Technicals (Subplots - Restored)
+            st.subheader("📉 Technical Analysis (RSI & MACD)")
             fig_tech = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5], vertical_spacing=0.05)
             fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI'], name='RSI', line=dict(color='purple')), row=1, col=1)
             fig_tech.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
             fig_tech.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
             fig_tech.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD'), row=2, col=1)
             fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MACD'], name='MACD Line', line=dict(color='blue')), row=2, col=1)
+            
+            # Apply mobile config to complex chart
             fig_tech = make_mobile_chart(fig_tech, height=500)
             st.plotly_chart(fig_tech, use_container_width=True)
 
-            # 4. Financials
+            # 4. Financial Statements (Restored)
             st.subheader("📑 Quarterly Reports")
             inc = stock.quarterly_income_stmt
             bal = stock.quarterly_balance_sheet
@@ -352,7 +320,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                 fig_fin = plot_financial_metrics(inc, cf, ticker_symbol)
                 if fig_fin: st.plotly_chart(fig_fin, use_container_width=True)
 
-            # 5. News
+            # 5. News (Restored)
             st.divider()
             st.subheader(f"📰 AI News")
             news = fetch_news_from_api(ticker_symbol, stock.info.get('shortName', ticker_symbol))
@@ -401,6 +369,8 @@ with results_tab:
     if 'results' in st.session_state:
         portfolios, total_val, prices, fig = st.session_state.results
         st.metric("Portfolio Value", f"${total_val:,.2f}")
+        
+        # Display Classic Matplotlib Chart (Mobile Friendly)
         st.pyplot(fig, use_container_width=True)
         
         t1, t2, t3 = st.tabs(["🛡️ Low", "⚖️ Mid", "🚀 High"])
@@ -426,9 +396,9 @@ with compare_tab:
             raw_p, norm_p, _ = analyze_stock_comparison(final, per)
             if norm_p is not None:
                 st.subheader("Performance (%)")
-                st.line_chart(norm_p)
+                st.line_chart(norm_p) # Native Streamlit Chart
                 st.subheader("Price ($)")
-                st.line_chart(raw_p)
+                st.line_chart(raw_p) # Native Streamlit Chart
 
 with deep_dive_tab:
     c1, c2 = st.columns([2, 1])
