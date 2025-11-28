@@ -2,13 +2,16 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import requests
 import json
 import textwrap
+import math
 from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
 from pypfopt import EfficientFrontier, risk_models, expected_returns
+from pypfopt.plotting import plot_efficient_frontier
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
@@ -22,24 +25,15 @@ except (FileNotFoundError, KeyError):
     GEMINI_API_KEY = None
 
 # --- MOBILE CHART HELPER ---
-def make_chart_responsive(fig, height=450, title=None):
-    """
-    Makes Plotly charts feel like native mobile apps:
-    1. Drag mode = Pan (prevents getting stuck while scrolling page)
-    2. Legend = Bottom (saves horizontal space)
-    3. Margins = Tight (uses full screen width)
-    """
+def make_mobile_chart(fig, height=500, title=None):
+    """Optimizes Plotly charts for mobile viewing."""
     if title: fig.update_layout(title=title)
     fig.update_layout(
         height=height,
         template="plotly_dark",
         margin=dict(l=10, r=10, t=50, b=10),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom", y=-0.25,
-            xanchor="center", x=0.5
-        ),
-        dragmode='pan', 
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+        dragmode='pan',
         hovermode="x unified"
     )
     return fig
@@ -80,7 +74,7 @@ def get_gemini_analysis(ticker, news_articles):
         return json.loads(resp.json()['candidates'][0]['content']['parts'][0]['text']) if resp.status_code == 200 else None
     except: return None
 
-# --- HELPER FUNCTIONS (CALCULATIONS) ---
+# --- HELPER FUNCTIONS (CALCULATIONS & VALUATION) ---
 
 def calculate_technical_indicators(df):
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
@@ -97,9 +91,39 @@ def calculate_technical_indicators(df):
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
     return df
 
+def calculate_intrinsic_value(stock_info):
+    """
+    Calculates Intrinsic Value using Graham Number and Lynch Fair Value.
+    """
+    try:
+        current_price = stock_info.get('currentPrice', 0)
+        eps = stock_info.get('trailingEps')
+        book_value = stock_info.get('bookValue')
+        growth_rate = stock_info.get('earningsGrowth', 0) # 0.15 for 15%
+        
+        # 1. Benjamin Graham Number (Value Stock Focus)
+        # Formula: Sqrt(22.5 * EPS * Book Value)
+        graham_number = None
+        if eps and book_value and eps > 0 and book_value > 0:
+            graham_number = math.sqrt(22.5 * eps * book_value)
+
+        # 2. Peter Lynch Fair Value (Growth Stock Focus)
+        # Formula: PEG = 1 is fair. So Fair P/E = Growth Rate. Value = EPS * Growth * 100
+        # We adjust slightly: Fair Value = EPS * (Growth Rate * 100)
+        lynch_value = None
+        if eps and growth_rate and eps > 0 and growth_rate > 0:
+            # We cap growth at 25% to prevent unrealistic valuations for explosive startups
+            capped_growth = min(growth_rate * 100, 25) 
+            # Lynch usually adds Dividend Yield to growth, we'll keep it simple for now
+            lynch_value = eps * capped_growth
+
+        return current_price, graham_number, lynch_value
+    except Exception as e:
+        return 0, None, None
+
 def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
     try:
-        with st.spinner("Crunching data..."):
+        with st.spinner("Calculating optimal portfolio..."):
             df = yf.download(tickers, start=start_date, progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 try: df = df['Close']
@@ -119,80 +143,43 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
         S = risk_models.sample_cov(df)
 
         portfolios = {}
-        
-        # 1. Calculate Optimal Points
+        # 1. Low Risk
         ef_low = EfficientFrontier(mu, S)
         ef_low.min_volatility()
         portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
+        # 2. Medium Risk
         ef_med = EfficientFrontier(mu, S)
         ef_med.max_sharpe()
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
+        # 3. High Risk
         min_ret, _, _ = portfolios['low_risk']['performance']
-        max_ret = mu.max()
-        
         ef_high = EfficientFrontier(mu, S)
         try:
-            ef_high.efficient_return(min_ret + 0.8 * (max_ret - min_ret))
+            ef_high.efficient_return(min_ret + 0.8 * (mu.max() - min_ret))
             portfolios['high_risk'] = {'weights': ef_high.clean_weights(), 'performance': ef_high.portfolio_performance()}
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        # --- PLOTLY "OLD STYLE" CURVE GENERATION ---
-        # We manually calculate 20 points along the frontier to draw the smooth curve
-        # This replicates the Matplotlib "line" look but makes it interactive
-        frontier_volatility = []
-        frontier_returns = []
+        # --- PLOTTING (Classic Matplotlib - Mobile Optimized) ---
+        plt.rcParams.update({'font.size': 14, 'axes.labelsize': 14, 'axes.titlesize': 16, 'legend.fontsize': 12})
+        fig, ax = plt.subplots(figsize=(8, 8))
+        plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
         
-        # Generate target returns from min_vol to max_ret
-        target_returns = np.linspace(min_ret, max_ret * 0.95, 20)
-        
-        for tr in target_returns:
-            try:
-                ef = EfficientFrontier(mu, S)
-                ef.efficient_return(tr)
-                ret, vol, _ = ef.portfolio_performance()
-                frontier_returns.append(ret)
-                frontier_volatility.append(vol)
-            except: pass
-
-        # --- DRAW CHART ---
-        fig = go.Figure()
-
-        # 1. The Efficient Frontier Curve (The Blue Line)
-        fig.add_trace(go.Scatter(
-            x=frontier_volatility, y=frontier_returns, 
-            mode='lines', 
-            name='Efficient Frontier',
-            line=dict(color='cyan', width=3, dash='solid')
-        ))
-
-        # 2. Optimal Markers (Large & Tappable)
-        scenarios = [('low_risk', 'Lowest Risk', 'green', 'circle'), ('medium_risk', 'Max Sharpe', 'blue', 'star'), ('high_risk', 'High Risk', 'red', 'x')]
-        for key, label, color, symbol in scenarios:
+        scenarios = [('low_risk', 'Lowest Risk', 'green', 'o'), ('medium_risk', 'Max Sharpe', 'blue', '*'), ('high_risk', 'High Risk', 'red', 'X')]
+        for key, label, color, marker in scenarios:
             r, v, _ = portfolios[key]['performance']
-            fig.add_trace(go.Scatter(
-                x=[v], y=[r], mode='markers', 
-                marker=dict(color=color, size=18, symbol=symbol, line=dict(color='white', width=2)), 
-                name=label,
-                text=[label],
-                hovertemplate="<b>%{text}</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>"
-            ))
-
-        # 3. Current Portfolio Marker
+            ax.scatter(v, r, marker=marker, s=200, c=color, label=label, zorder=5)
+        
         curr_series = pd.Series(current_weights).reindex(df.columns, fill_value=0)
         curr_ret = np.sum(mu * curr_series)
         curr_std = np.sqrt(np.dot(curr_series.T, np.dot(S, curr_series)))
-        fig.add_trace(go.Scatter(
-            x=[curr_std], y=[curr_ret], mode='markers', 
-            marker=dict(color='yellow', size=18, symbol='diamond', line=dict(color='black', width=2)), 
-            name='Current',
-            hovertemplate="<b>Current</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>"
-        ))
+        ax.scatter(curr_std, curr_ret, marker='D', s=200, c='yellow', edgecolors='black', label='Current', zorder=5)
 
-        fig.update_layout(xaxis_title="Risk (Volatility)", yaxis_title="Expected Return")
-        fig = make_chart_responsive(fig, title="Efficient Frontier")
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=2)
+        ax.set_title("Efficient Frontier", pad=20)
+        plt.tight_layout()
 
         return portfolios, total_val, latest_prices, fig
 
@@ -217,17 +204,8 @@ def display_portfolio_results(tab, name, perf, weights, rebal_data):
         c2.metric("Risk", f"{perf[1]*100:.1f}%")
         c3.metric("Sharpe", f"{perf[2]:.2f}")
         
-        # Interactive Bar Chart
         active_w = {k: v*100 for k, v in weights.items() if v > 0.001}
-        df_w = pd.DataFrame.from_dict(active_w, orient='index', columns=['Weight'])
-        fig = go.Figure(go.Bar(
-            x=df_w.index, y=df_w['Weight'],
-            marker_color='#4CAF50',
-            text=df_w['Weight'].apply(lambda x: f"{x:.1f}%"),
-            textposition='auto'
-        ))
-        fig.update_layout(yaxis_title="Weight (%)")
-        st.plotly_chart(make_chart_responsive(fig, height=300), use_container_width=True)
+        st.bar_chart(pd.DataFrame.from_dict(active_w, orient='index', columns=['Weight']))
         
         if rebal_data: st.dataframe(pd.DataFrame(rebal_data), use_container_width=True)
         else: st.info("No rebalancing needed.")
@@ -244,17 +222,8 @@ def analyze_stock_comparison(tickers, period):
             else: df_close = df[['Close']] if 'Close' in df.columns else df
 
         if df_close.empty: return None, None, None
-        
         norm_df = (df_close / df_close.iloc[0] - 1) * 100
         
-        # Interactive Line Chart
-        fig = go.Figure()
-        for col in norm_df.columns:
-            fig.add_trace(go.Scatter(x=norm_df.index, y=norm_df[col], name=col))
-        
-        fig.update_layout(yaxis_title="% Return")
-        fig = make_chart_responsive(fig, title=f"Performance ({period})")
-
         tech_summary = []
         for t in tickers:
             try:
@@ -265,34 +234,125 @@ def analyze_stock_comparison(tickers, period):
                     tech_summary.append({"Ticker": t, "Price": s.iloc[-1], "RSI": f"{rsi:.1f}"})
             except: continue
 
-        return df_close, fig, tech_summary
+        return df_close, norm_df, tech_summary
     except: return None, None, None
 
+def display_fundamental_metrics(stock):
+    try:
+        info = stock.info
+        def get_metric(key, fmt="{:,.2f}", multiplier=1):
+            val = info.get(key)
+            if val is None: return "N/A"
+            return fmt.format(val * multiplier)
+
+        st.subheader("🏗️ Fundamentals")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Mkt Cap", get_metric("marketCap", "{:,.0f}"))
+        c2.metric("P/E", get_metric("trailingPE"))
+        c3.metric("Profit %", get_metric("profitMargins", "{:.2f}%", 100))
+        c4.metric("Div %", get_metric("dividendYield", "{:.2f}%", 100))
+        st.divider()
+    except: st.warning("Fundamental data unavailable.")
+
+def display_intrinsic_value(stock_info, ticker_symbol):
+    """Calculates and displays Intrinsic Value cards."""
+    st.subheader("💎 Intrinsic Value & Fair Price")
+    
+    curr, graham, lynch = calculate_intrinsic_value(stock_info)
+    
+    if curr > 0:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Current Price", f"${curr:,.2f}")
+        
+        if graham:
+            delta = ((graham - curr) / curr) * 100
+            color = "normal" if delta < 0 else "inverse" # Streamlit handles color by delta sign usually, but we'll use delta
+            c2.metric("Graham Number (Value)", f"${graham:,.2f}", f"{delta:.1f}%")
+            st.caption(f"Based on Assets & Earnings. Best for stable value stocks like Banks/Utilities.")
+        else:
+            c2.info("Graham Number N/A (Negative Earnings/Book)")
+
+        if lynch:
+            delta = ((lynch - curr) / curr) * 100
+            c3.metric("Lynch Fair Value (Growth)", f"${lynch:,.2f}", f"{delta:.1f}%")
+            st.caption(f"Based on PEG Ratio. Assumes Fair P/E = Growth Rate. Best for Growth stocks.")
+        else:
+            c3.info("Lynch Value N/A (Missing Growth Data)")
+    st.divider()
+
+def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
+    try:
+        income_stmt = income_stmt.iloc[:, :4].iloc[:, ::-1]
+        cash_flow = cash_flow.iloc[:, :4].iloc[:, ::-1]
+        dates = [d.strftime('%Y-%m-%d') for d in pd.to_datetime(income_stmt.columns)]
+
+        rev = income_stmt.loc['Total Revenue'] / 1e6 if 'Total Revenue' in income_stmt.index else pd.Series(0, index=dates)
+        net = income_stmt.loc['Net Income'] / 1e6 if 'Net Income' in income_stmt.index else pd.Series(0, index=dates)
+        fcf = cash_flow.loc['Free Cash Flow'] / 1e6 if 'Free Cash Flow' in cash_flow.index else pd.Series(0, index=dates)
+
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=('Revenue & Net Income', 'Free Cash Flow'))
+        fig.add_trace(go.Bar(x=dates, y=rev, name='Revenue'), row=1, col=1)
+        fig.add_trace(go.Bar(x=dates, y=net, name='Net Income'), row=1, col=1)
+        fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', marker_color='teal'), row=2, col=1)
+        fig = make_mobile_chart(fig, height=600, title=f'Financials (M USD): {ticker_symbol}')
+        return fig
+    except: return None
+
 def analyze_single_stock_financials(ticker_symbol, period="2y"):
+    """Deep Dive with Technicals, Financials, Valuation, and News."""
     try:
         stock = yf.Ticker(ticker_symbol)
         with st.spinner(f"Analyzing {ticker_symbol}..."):
             hist = stock.history(period="2y")
-            if hist.empty: return
+            if hist.empty: 
+                st.error("No data found.")
+                return
 
             hist = calculate_technical_indicators(hist)
             start_idx = -63 if period == "3mo" else -252 if period == "1y" else -504
             plot_df = hist.iloc[start_idx:]
 
-            # 1. Price Chart 
+            # 1. Price Chart
             fig_price = go.Figure()
-            fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], name='Price', line=dict(color='cyan', width=2)))
+            fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], name='Price', line=dict(color='cyan')))
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['SMA_50'], name='SMA 50', line=dict(color='orange', width=1)))
-            st.plotly_chart(make_chart_responsive(fig_price, title=f"{ticker_symbol} Price"), use_container_width=True)
+            fig_price = make_mobile_chart(fig_price, title=f"{ticker_symbol} Price", height=400)
+            st.plotly_chart(fig_price, use_container_width=True)
 
-            # 2. Fundamentals
-            info = stock.info
-            c1, c2, c3 = st.columns(3)
-            c1.metric("P/E", info.get("trailingPE", "N/A"))
-            c2.metric("Mkt Cap", f"{info.get('marketCap', 0)/1e9:.1f}B")
-            c3.metric("Div Yield", f"{info.get('dividendYield', 0)*100:.2f}%")
+            # 2. Fundamentals & Valuation (NEW SECTION)
+            display_fundamental_metrics(stock)
+            display_intrinsic_value(stock.info, ticker_symbol)
 
-            # 3. News
+            # 3. Technicals
+            st.subheader("📉 Technical Analysis")
+            fig_tech = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5], vertical_spacing=0.05)
+            fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI'], name='RSI', line=dict(color='purple')), row=1, col=1)
+            fig_tech.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
+            fig_tech.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
+            fig_tech.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD'), row=2, col=1)
+            fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MACD'], name='MACD Line', line=dict(color='blue')), row=2, col=1)
+            fig_tech = make_mobile_chart(fig_tech, height=500)
+            st.plotly_chart(fig_tech, use_container_width=True)
+
+            # 4. Financials
+            st.subheader("📑 Quarterly Reports")
+            inc = stock.quarterly_income_stmt
+            bal = stock.quarterly_balance_sheet
+            cf = stock.quarterly_cashflow
+            
+            tab_f1, tab_f2, tab_f3 = st.tabs(["Income", "Balance", "Cash Flow"])
+            with tab_f1: 
+                if not inc.empty: st.dataframe((inc/1e6).round(2), use_container_width=True)
+            with tab_f2: 
+                if not bal.empty: st.dataframe((bal/1e6).round(2), use_container_width=True)
+            with tab_f3: 
+                if not cf.empty: st.dataframe((cf/1e6).round(2), use_container_width=True)
+
+            if not inc.empty and not cf.empty:
+                fig_fin = plot_financial_metrics(inc, cf, ticker_symbol)
+                if fig_fin: st.plotly_chart(fig_fin, use_container_width=True)
+
+            # 5. News
             st.divider()
             st.subheader(f"📰 AI News")
             news = fetch_news_from_api(ticker_symbol, stock.info.get('shortName', ticker_symbol))
@@ -341,7 +401,8 @@ with results_tab:
     if 'results' in st.session_state:
         portfolios, total_val, prices, fig = st.session_state.results
         st.metric("Portfolio Value", f"${total_val:,.2f}")
-        st.plotly_chart(fig, use_container_width=True)
+        st.pyplot(fig, use_container_width=True)
+        
         t1, t2, t3 = st.tabs(["🛡️ Low", "⚖️ Mid", "🚀 High"])
         scenarios = [(t1, 'low_risk', "Low Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
         for tab, key, name in scenarios:
@@ -362,8 +423,12 @@ with compare_tab:
     if st.button("Compare", use_container_width=True):
         final = list(set(sel_t + [t.strip().upper() for t in ext_t.split(",") if t.strip()]))
         if final:
-            _, fig, _ = analyze_stock_comparison(final, per)
-            if fig: st.plotly_chart(fig, use_container_width=True)
+            raw_p, norm_p, _ = analyze_stock_comparison(final, per)
+            if norm_p is not None:
+                st.subheader("Performance (%)")
+                st.line_chart(norm_p)
+                st.subheader("Price ($)")
+                st.line_chart(raw_p)
 
 with deep_dive_tab:
     c1, c2 = st.columns([2, 1])
