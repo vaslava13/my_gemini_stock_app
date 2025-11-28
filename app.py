@@ -24,23 +24,16 @@ except (FileNotFoundError, KeyError):
     NEWS_API_KEY = None
     GEMINI_API_KEY = None
 
-# --- HELPER: MOBILE CHART CONFIG ---
-def make_mobile_friendly(fig, height=500):
-    """
-    Keeps the exact look of Plotly charts but makes them usable on phones.
-    1. Sets dragmode to 'pan' (prevents scroll trapping).
-    2. Moves legend to bottom (saves width).
-    3. Adjusts margins.
-    """
+# --- MOBILE CHART HELPER (DEEP DIVE ONLY) ---
+def make_mobile_chart(fig, height=500, title=None):
+    if title: fig.update_layout(title=title)
     fig.update_layout(
         height=height,
-        dragmode='pan',  # Critical for mobile scrolling
-        legend=dict(
-            orientation="h",
-            yanchor="bottom", y=-0.2,
-            xanchor="center", x=0.5
-        ),
-        margin=dict(l=10, r=10, t=40, b=10),
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=50, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+        dragmode='pan',
+        hovermode="x unified"
     )
     return fig
 
@@ -80,7 +73,7 @@ def get_gemini_analysis(ticker, news_articles):
         return json.loads(resp.json()['candidates'][0]['content']['parts'][0]['text']) if resp.status_code == 200 else None
     except: return None
 
-# --- HELPER FUNCTIONS (CALCULATIONS) ---
+# --- HELPER FUNCTIONS (CALCULATIONS & VALUATION) ---
 
 def calculate_technical_indicators(df):
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
@@ -97,18 +90,79 @@ def calculate_technical_indicators(df):
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
     return df
 
-def calculate_intrinsic_value(stock_info):
+def display_valuation_models(info):
+    """
+    Calculates and displays intrinsic value with detailed breakdowns.
+    """
+    st.subheader("💎 Valuation & Intrinsic Value")
+    
     try:
-        curr = stock_info.get('currentPrice', 0)
-        eps = stock_info.get('trailingEps')
-        book = stock_info.get('bookValue')
-        growth = stock_info.get('earningsGrowth', 0)
+        curr_price = info.get('currentPrice', 0)
+        eps = info.get('trailingEps')
+        book_val = info.get('bookValue')
+        growth_raw = info.get('earningsGrowth', 0) # e.g. 0.15
         
-        graham = math.sqrt(22.5 * eps * book) if eps and book and eps > 0 and book > 0 else None
-        lynch = eps * min(growth * 100, 25) if eps and growth and eps > 0 and growth > 0 else None
-        
-        return curr, graham, lynch
-    except: return 0, None, None
+        # --- MODEL 1: GRAHAM NUMBER ---
+        st.markdown("##### 1. Benjamin Graham Number (Value)")
+        graham_val = 0
+        if eps and book_val and eps > 0 and book_val > 0:
+            graham_val = math.sqrt(22.5 * eps * book_val)
+            delta = ((graham_val - curr_price) / curr_price) * 100
+            color = "green" if delta > 0 else "red"
+            
+            c1, c2 = st.columns([1, 3])
+            c1.metric("Graham Value", f"${graham_val:.2f}", f"{delta:.1f}%")
+            
+            with c2.expander("Show Calculation & Assumptions"):
+                st.markdown(f"""
+                **Formula:** $\sqrt{{22.5 \\times EPS \\times BookValue}}$
+                
+                *This classic formula by the 'Father of Value Investing' finds the maximum fair price for a defensive stock.*
+                
+                **Your Data:**
+                - Trailing EPS: `${eps}`
+                - Book Value per Share: `${book_val}`
+                - Constant: `22.5` (Assumes P/E of 15 and P/B of 1.5)
+                
+                **Calculation:** $\sqrt{{22.5 \\times {eps} \\times {book_val}}} = \mathbf{{\${graham_val:.2f}}}$
+                """)
+        else:
+            st.info("Cannot calculate Graham Number: Negative Earnings or Book Value.")
+
+        # --- MODEL 2: PETER LYNCH FAIR VALUE ---
+        st.markdown("##### 2. Peter Lynch Fair Value (Growth)")
+        lynch_val = 0
+        if eps and growth_raw and eps > 0:
+            growth_rate = growth_raw * 100
+            # Cap growth at 25% to be conservative, floor at 5%
+            adj_growth = max(min(growth_rate, 25), 5)
+            
+            lynch_val = eps * adj_growth
+            delta_l = ((lynch_val - curr_price) / curr_price) * 100
+            
+            c1, c2 = st.columns([1, 3])
+            c1.metric("Lynch Value", f"${lynch_val:.2f}", f"{delta_l:.1f}%")
+            
+            with c2.expander("Show Calculation & Assumptions"):
+                st.markdown(f"""
+                **Formula:** $EPS \\times GrowthRate$
+                
+                *Peter Lynch (Magellan Fund) famously looked for a PEG ratio of 1. This implies a stock is fairly valued when its P/E equals its Growth Rate.*
+                
+                **Your Data:**
+                - Trailing EPS: `${eps}`
+                - Earnings Growth (Yearly): `{growth_rate:.1f}%`
+                - Adjusted Growth Cap: `{adj_growth:.1f}` (We cap at 25% for safety)
+                
+                **Calculation:** ${eps} \\times {adj_growth:.1f} = \mathbf{{\${lynch_val:.2f}}}$
+                """)
+        else:
+            st.info("Cannot calculate Lynch Value: Missing or negative growth data.")
+            
+        st.divider()
+
+    except Exception as e:
+        st.warning(f"Could not calculate valuation metrics: {e}")
 
 def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
     try:
@@ -132,14 +186,17 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
         S = risk_models.sample_cov(df)
 
         portfolios = {}
+        # 1. Low Risk
         ef_low = EfficientFrontier(mu, S)
         ef_low.min_volatility()
         portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
+        # 2. Medium Risk
         ef_med = EfficientFrontier(mu, S)
         ef_med.max_sharpe()
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
+        # 3. High Risk
         min_ret, _, _ = portfolios['low_risk']['performance']
         ef_high = EfficientFrontier(mu, S)
         try:
@@ -148,14 +205,9 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        # --- PLOTTING (Restored Matplotlib - Mobile Optimized) ---
-        # 1. Increase font size for mobile readability
-        plt.rcParams.update({'font.size': 12, 'axes.labelsize': 14, 'legend.fontsize': 12})
-        
-        # 2. Use SQUARE aspect ratio (8x8) instead of wide rectangle (10x6)
-        # This prevents the graph from getting squashed on phone screens
-        fig, ax = plt.subplots(figsize=(8, 8))
-        
+        # --- PLOTTING (Classic Matplotlib - Mobile Optimized) ---
+        plt.rcParams.update({'font.size': 14, 'axes.labelsize': 14, 'axes.titlesize': 16, 'legend.fontsize': 12})
+        fig, ax = plt.subplots(figsize=(8, 8)) # Square aspect ratio
         plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
         
         scenarios = [('low_risk', 'Lowest Risk', 'green', 'o'), ('medium_risk', 'Max Sharpe', 'blue', '*'), ('high_risk', 'High Risk', 'red', 'X')]
@@ -168,7 +220,6 @@ def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01'):
         curr_std = np.sqrt(np.dot(curr_series.T, np.dot(S, curr_series)))
         ax.scatter(curr_std, curr_ret, marker='D', s=200, c='yellow', edgecolors='black', label='Current', zorder=5)
 
-        # 3. Move Legend BELOW the chart
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=2)
         ax.set_title("Efficient Frontier", pad=20)
         plt.tight_layout()
@@ -246,20 +297,6 @@ def display_fundamental_metrics(stock):
         st.divider()
     except: st.warning("Fundamental data unavailable.")
 
-def display_intrinsic_value(stock_info, ticker_symbol):
-    st.subheader("💎 Intrinsic Value")
-    curr, graham, lynch = calculate_intrinsic_value(stock_info)
-    if curr > 0:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Current Price", f"${curr:,.2f}")
-        if graham:
-            delta = ((graham - curr) / curr) * 100
-            c2.metric("Graham (Value)", f"${graham:,.2f}", f"{delta:.1f}%")
-        if lynch:
-            delta = ((lynch - curr) / curr) * 100
-            c3.metric("Lynch (Growth)", f"${lynch:,.2f}", f"{delta:.1f}%")
-    st.divider()
-
 def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
     try:
         income_stmt = income_stmt.iloc[:, :4].iloc[:, ::-1]
@@ -275,11 +312,12 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
         fig.add_trace(go.Bar(x=dates, y=net, name='Net Income'), row=1, col=1)
         fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', marker_color='teal'), row=2, col=1)
         
-        fig.update_layout(title_text=f'Financials (M USD): {ticker_symbol}', title_x=0.5, template='plotly_dark', hovermode='x unified')
-        return make_mobile_friendly(fig, height=600)
+        fig = make_mobile_chart(fig, height=600, title=f'Financials (M USD): {ticker_symbol}')
+        return fig
     except: return None
 
 def analyze_single_stock_financials(ticker_symbol, period="2y"):
+    """Deep Dive with Technicals, Financials, Valuation, and News."""
     try:
         stock = yf.Ticker(ticker_symbol)
         with st.spinner(f"Analyzing {ticker_symbol}..."):
@@ -292,18 +330,20 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             start_idx = -63 if period == "3mo" else -252 if period == "1y" else -504
             plot_df = hist.iloc[start_idx:]
 
-            # 1. Price Chart (Plotly - Mobile Optimized)
+            # 1. Price Chart
             fig_price = go.Figure()
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['Close'], name='Price', line=dict(color='cyan')))
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['SMA_50'], name='SMA 50', line=dict(color='orange')))
-            fig_price.update_layout(title=f"{ticker_symbol} Price", template="plotly_dark")
-            st.plotly_chart(make_mobile_friendly(fig_price, height=400), use_container_width=True)
+            fig_price = make_mobile_chart(fig_price, title=f"{ticker_symbol} Price", height=400)
+            st.plotly_chart(fig_price, use_container_width=True)
 
-            # 2. Fundamentals & Valuation
+            # 2. Fundamentals
             display_fundamental_metrics(stock)
-            display_intrinsic_value(stock.info, ticker_symbol)
+            
+            # --- NEW: VALUATION MODELS ---
+            display_valuation_models(stock.info)
 
-            # 3. Technicals (Plotly - Mobile Optimized)
+            # 3. Technicals
             st.subheader("📉 Technical Analysis")
             fig_tech = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5], vertical_spacing=0.05)
             fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['RSI'], name='RSI', line=dict(color='purple')), row=1, col=1)
@@ -311,7 +351,8 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             fig_tech.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
             fig_tech.add_trace(go.Bar(x=plot_df.index, y=plot_df['MACD_Hist'], name='MACD'), row=2, col=1)
             fig_tech.add_trace(go.Scatter(x=plot_df.index, y=plot_df['MACD'], name='MACD Line', line=dict(color='blue')), row=2, col=1)
-            st.plotly_chart(make_mobile_friendly(fig_tech, height=500), use_container_width=True)
+            fig_tech = make_mobile_chart(fig_tech, height=500)
+            st.plotly_chart(fig_tech, use_container_width=True)
 
             # 4. Financials
             st.subheader("📑 Quarterly Reports")
@@ -380,10 +421,7 @@ with results_tab:
     if 'results' in st.session_state:
         portfolios, total_val, prices, fig = st.session_state.results
         st.metric("Portfolio Value", f"${total_val:,.2f}")
-        
-        # DISPLAY: Old Style Matplotlib (Responsive)
         st.pyplot(fig, use_container_width=True)
-        
         t1, t2, t3 = st.tabs(["🛡️ Low", "⚖️ Mid", "🚀 High"])
         scenarios = [(t1, 'low_risk', "Low Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
         for tab, key, name in scenarios:
@@ -407,9 +445,9 @@ with compare_tab:
             raw_p, norm_p, _ = analyze_stock_comparison(final, per)
             if norm_p is not None:
                 st.subheader("Performance (%)")
-                st.line_chart(norm_p) # Old Style Native Chart
+                st.line_chart(norm_p)
                 st.subheader("Price ($)")
-                st.line_chart(raw_p) # Old Style Native Chart
+                st.line_chart(raw_p)
 
 with deep_dive_tab:
     c1, c2 = st.columns([2, 1])
