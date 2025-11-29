@@ -621,45 +621,6 @@ with input_tab:
                 total_val, p['performance'][0])
             display_portfolio_results(tab, name, p['performance'], p['weights'], plan)
 
-# --- TAB 2: RESULTS ---
-with results_tab:
-    # Check if results exist in session state
-    if 'results' in st.session_state and st.session_state.results is not None:
-        portfolios, total_val, prices, fig = st.session_state.results
-        
-        # 1. Display Total Portfolio Value (Added as requested)
-        st.metric("Total Portfolio Value", f"${total_val:,.2f}")
-        
-        # 2. Display the Efficient Frontier Chart
-        # Uses st.pyplot for the Matplotlib figure we generated
-        st.pyplot(fig, use_container_width=True)
-        
-        st.divider()
-        
-        # 3. Display Strategy Tabs
-        t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
-        scenarios = [
-            (t1, 'low_risk', "Lowest Risk"), 
-            (t2, 'medium_risk', "Balanced"), 
-            (t3, 'high_risk', "High Risk")
-        ]
-        
-        for tab, key, name in scenarios:
-            p = portfolios[key]
-            
-            # Calculate rebalancing for this specific strategy
-            plan = calculate_rebalancing_plan(
-                p['weights'], prices, 
-                {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
-                total_val, p['performance'][0]
-            )
-            
-            # Render the metrics, bar chart, and table
-            display_portfolio_results(tab, name, p['performance'], p['weights'], plan)
-            
-    else:
-        st.info("👈 Please go to the 'Edit Portfolio' tab and click 'Analyze Portfolio' to see results.")
-
 # --- TAB 3: COMPARISON ---
 with compare_tab:
     st.header("Compare Stock Performance")
