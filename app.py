@@ -546,21 +546,30 @@ input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
 # --- TAB 1: INPUT ---
 with input_tab:
     st.markdown("### Enter your Portfolio")
-    edited_df = st.data_editor(st.session_state.portfolio_data, num_rows="dynamic", use_container_width=True)
+    
+    # Configure the editor to show $ signs and round to 2 decimals
+    edited_df = st.data_editor(
+        st.session_state.portfolio_data,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Ticker": st.column_config.TextColumn("Ticker", required=True),
+            "Shares": st.column_config.NumberColumn("Shares", min_value=0, step=1, required=True),
+            "Price": st.column_config.NumberColumn(
+                "Price", 
+                format="$%.2f",   # <--- Adds $ and rounds to 2 decimals
+                disabled=True     # <--- Prevents manual editing
+            ),
+            "Total Value": st.column_config.NumberColumn(
+                "Total Value", 
+                format="$%.2f",   # <--- Adds $ and rounds to 2 decimals
+                disabled=True     # <--- Prevents manual editing
+            )
+        }
+    )
+    
+    # Update session state with changes
     st.session_state.portfolio_data = edited_df
-
-    if st.button("🚀 Analyze Portfolio", type="primary"):
-        if edited_df.empty:
-            st.error("Please add at least one stock.")
-        else:
-            user_tickers = [t.upper() for t in edited_df["Ticker"].tolist() if t]
-            user_holdings = {row["Ticker"].upper(): row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
-            results = optimize_portfolio(user_tickers, user_holdings, start_date='2023-01-01')
-            if results[0] is not None:
-                st.session_state.results = results
-                st.success("Optimization Complete! Switch to the 'Analysis Results' tab.")
-            else:
-                st.session_state.results = None
 
 # --- TAB 2: RESULTS ---
 with results_tab:
