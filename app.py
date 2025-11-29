@@ -548,11 +548,22 @@ with input_tab:
     st.markdown("### Enter your Portfolio")
     
     # Recalculate weights dynamically based on current data
-    # (This ensures weights update if you change share counts)
     curr_df = st.session_state.portfolio_data
-    total_val = (curr_df['Shares'] * curr_df['Price']).sum()
-    curr_df['Total Value'] = curr_df['Shares'] * curr_df['Price']
-    curr_df['Weight'] = curr_df['Total Value'].apply(lambda x: (x / total_val * 100) if total_val > 0 else 0)
+    
+    # Ensure calculation works even if empty
+    if not curr_df.empty:
+        # Calculate Total Value for each row
+        curr_df['Total Value'] = curr_df['Shares'] * curr_df['Price']
+        
+        # Calculate Grand Total
+        grand_total = curr_df['Total Value'].sum()
+        
+        # Calculate Weights (Avoid division by zero)
+        if grand_total > 0:
+            curr_df['Weight'] = (curr_df['Total Value'] / grand_total) * 100
+        else:
+            curr_df['Weight'] = 0.0
+            
     st.session_state.portfolio_data = curr_df
 
     # Configure the editor
@@ -565,13 +576,12 @@ with input_tab:
             "Shares": st.column_config.NumberColumn("Shares", min_value=0, step=1, required=True),
             "Price": st.column_config.NumberColumn("Price", format="$%.2f", disabled=True),
             "Total Value": st.column_config.NumberColumn("Total Value", format="$%.2f", disabled=True),
-            # NEW: Weight Column Configuration
+            # FIX IS HERE: Removed 'disabled=True'
             "Weight": st.column_config.ProgressColumn(
                 "Weight", 
                 format="%.2f%%", 
                 min_value=0, 
-                max_value=100,
-                disabled=True
+                max_value=100
             )
         }
     )
@@ -579,7 +589,6 @@ with input_tab:
     st.session_state.portfolio_data = edited_df
 
     if st.button("🚀 Analyze", type="primary", use_container_width=True):
-        # ... (rest of your button logic remains the same) ...
         if edited_df.empty: st.error("Add stocks first.")
         else:
             ts = [t.upper() for t in edited_df["Ticker"].tolist() if t]
