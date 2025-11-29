@@ -576,12 +576,14 @@ with input_tab:
         }
     )
     
-    # Auto-rerun if edited so the Total Value updates immediately
+    # 3. Auto-Reset Results on Edit
+    # If the user changes data, we clear the old results to force a re-run
     if not edited_df.equals(st.session_state.portfolio_data):
         st.session_state.portfolio_data = edited_df
+        st.session_state.results = None 
         st.rerun()
 
-    # 3. Analyze Button
+    # 4. Analyze Button
     if st.button("🚀 Analyze Portfolio", type="primary", use_container_width=True):
         if edited_df.empty: 
             st.error("Add stocks first.")
@@ -596,14 +598,14 @@ with input_tab:
             else: 
                 st.error("Optimization failed.")
 
-    # 4. Results Section (Appears Below)
+    # 5. Results Section (Only shows AFTER button press)
     if 'results' in st.session_state and st.session_state.results is not None:
         st.divider()
         st.subheader("📊 Optimization Results")
         
         portfolios, total_val, prices, fig = st.session_state.results
         
-        # Display Chart (Square for Mobile)
+        # Display Old Style Matplotlib Chart (Square for Mobile)
         st.pyplot(fig, use_container_width=True)
         
         t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
