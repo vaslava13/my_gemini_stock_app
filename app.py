@@ -538,7 +538,6 @@ st.title("💰 AI FINANCIAL TOOL & PORTFOLIO OPTIMIZER")
 
 input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
     "✏️ Edit Portfolio", 
-    "📈 Analysis Results", 
     "🔍 Stock Comparison",
     "📊 Single Stock Deep Dive"
 ])
