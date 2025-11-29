@@ -117,7 +117,6 @@ def get_gemini_analysis(ticker, news_articles):
         return None
 
 # --- HELPER FUNCTIONS (CALCULATIONS) ---
-
 def calculate_technical_indicators(df):
     """Calculates RSI, MACD, and SMAs."""
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
@@ -269,7 +268,6 @@ def display_portfolio_results(tab, name, perf, weights, rebalancing_data):
             st.info("No significant rebalancing needed.")
 
 # --- HELPER FUNCTIONS (COMPARISON) ---
-
 def analyze_stock_comparison(tickers, period):
     """Downloads data for comparison and calculates Tech Indicators."""
     try:
@@ -323,7 +321,6 @@ def analyze_stock_comparison(tickers, period):
         return None, None, None
 
 # --- NEW HELPER FUNCTIONS (DEEP DIVE) ---
-
 def plot_price_history(hist_df, ticker_symbol):
     """Plots Price vs Time (Simple Line Chart)."""
     try:
@@ -500,7 +497,6 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
         st.error(f"An error occurred: {e}")
 
 # --- MAIN APPLICATION LOGIC ---
-
 if 'portfolio_data' not in st.session_state:
     st.session_state.portfolio_data = pd.DataFrame([
         {"Ticker": "AAPL", "Shares": 15},
@@ -512,7 +508,7 @@ if 'portfolio_data' not in st.session_state:
         {"Ticker": "AMZN", "Shares": 5}
     ])
 
-st.title("💰 AI Portfolio Optimizer")
+st.title("💰 AI FINANCIAL TOOL & PORTFOLIO OPTIMIZER")
 
 input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
     "✏️ Edit Portfolio", 
