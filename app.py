@@ -515,20 +515,20 @@ if 'portfolio_data' not in st.session_state:
     # 2. Fetch live closing prices
     tickers_list = df['Ticker'].tolist()
     try:
-        # Fetch 1 day of data to get the latest close
         market_data = yf.download(tickers_list, period="1d", progress=False)['Close'].iloc[-1]
         
-        # 3. Map prices to the DataFrame
-        # We use .get(t, 0) to handle cases where a ticker might fail to download
+        # 3. Map prices and calculate values
         df['Price'] = df['Ticker'].apply(lambda t: market_data.get(t, 0.0))
-        
-        # 4. Calculate Total Value
         df['Total Value'] = df['Shares'] * df['Price']
         
+        # 4. Calculate Weights
+        grand_total = df['Total Value'].sum()
+        df['Weight'] = df['Total Value'].apply(lambda x: (x / grand_total * 100) if grand_total > 0 else 0)
+        
     except Exception as e:
-        # Fallback if API fails (set prices to 0 so app doesn't crash)
         df['Price'] = 0.0
         df['Total Value'] = 0.0
+        df['Weight'] = 0.0
         print(f"Error fetching initial prices: {e}")
 
     # 5. Save to session state
@@ -547,7 +547,15 @@ input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
 with input_tab:
     st.markdown("### Enter your Portfolio")
     
-    # Configure the editor to show $ signs and round to 2 decimals
+    # Recalculate weights dynamically based on current data
+    # (This ensures weights update if you change share counts)
+    curr_df = st.session_state.portfolio_data
+    total_val = (curr_df['Shares'] * curr_df['Price']).sum()
+    curr_df['Total Value'] = curr_df['Shares'] * curr_df['Price']
+    curr_df['Weight'] = curr_df['Total Value'].apply(lambda x: (x / total_val * 100) if total_val > 0 else 0)
+    st.session_state.portfolio_data = curr_df
+
+    # Configure the editor
     edited_df = st.data_editor(
         st.session_state.portfolio_data,
         num_rows="dynamic",
@@ -555,21 +563,32 @@ with input_tab:
         column_config={
             "Ticker": st.column_config.TextColumn("Ticker", required=True),
             "Shares": st.column_config.NumberColumn("Shares", min_value=0, step=1, required=True),
-            "Price": st.column_config.NumberColumn(
-                "Price", 
-                format="$%.2f",   # <--- Adds $ and rounds to 2 decimals
-                disabled=True     # <--- Prevents manual editing
-            ),
-            "Total Value": st.column_config.NumberColumn(
-                "Total Value", 
-                format="$%.2f",   # <--- Adds $ and rounds to 2 decimals
-                disabled=True     # <--- Prevents manual editing
+            "Price": st.column_config.NumberColumn("Price", format="$%.2f", disabled=True),
+            "Total Value": st.column_config.NumberColumn("Total Value", format="$%.2f", disabled=True),
+            # NEW: Weight Column Configuration
+            "Weight": st.column_config.ProgressColumn(
+                "Weight", 
+                format="%.2f%%", 
+                min_value=0, 
+                max_value=100,
+                disabled=True
             )
         }
     )
     
-    # Update session state with changes
     st.session_state.portfolio_data = edited_df
+
+    if st.button("🚀 Analyze", type="primary", use_container_width=True):
+        # ... (rest of your button logic remains the same) ...
+        if edited_df.empty: st.error("Add stocks first.")
+        else:
+            ts = [t.upper() for t in edited_df["Ticker"].tolist() if t]
+            hs = {row["Ticker"].upper(): row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
+            res = optimize_portfolio(ts, hs)
+            if res[0]: 
+                st.session_state.results = res
+                st.success("Success! Go to Results tab.")
+            else: st.error("Optimization failed.")
 
 # --- TAB 2: RESULTS ---
 with results_tab:
