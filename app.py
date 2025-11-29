@@ -543,31 +543,27 @@ input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
     "📊 Single Stock Deep Dive"
 ])
 
-# --- TAB 1: INPUT ---
+# --- TAB 1: DASHBOARD (Merged Input + Results) ---
 with input_tab:
     st.markdown("### Enter your Portfolio")
-
-    # --- 1. CALCULATE & DISPLAY TOTAL (TOP) ---
-    curr_df = st.session_state.portfolio_data
     
-    # Recalculate totals based on current shares/prices
-    if not curr_df.empty and 'Price' in curr_df.columns:
+    # 1. Update Calcs & Display Total at Top
+    curr_df = st.session_state.portfolio_data
+    if not curr_df.empty:
         curr_df['Total Value'] = curr_df['Shares'] * curr_df['Price']
         grand_total = curr_df['Total Value'].sum()
         
-        # Calculate Weights for the progress bar
+        # Avoid division by zero for weights
         if grand_total > 0:
             curr_df['Weight'] = (curr_df['Total Value'] / grand_total) * 100
         else:
             curr_df['Weight'] = 0.0
             
-        # DISPLAY THE TOTAL VALUE
         st.metric("Total Portfolio Value", f"${grand_total:,.2f}")
     
-    # Update session state with clean calculations before showing editor
     st.session_state.portfolio_data = curr_df
 
-    # --- 2. DATA EDITOR ---
+    # 2. Editor
     edited_df = st.data_editor(
         st.session_state.portfolio_data,
         num_rows="dynamic",
@@ -580,14 +576,14 @@ with input_tab:
             "Weight": st.column_config.ProgressColumn("Weight", format="%.2f%%", min_value=0, max_value=100)
         }
     )
-
-    # Trigger an instant update if the user changes anything
+    
+    # Auto-rerun if edited so the Total Value updates immediately
     if not edited_df.equals(st.session_state.portfolio_data):
         st.session_state.portfolio_data = edited_df
         st.rerun()
 
-    # --- 3. ANALYZE BUTTON ---
-    if st.button("🚀 Analyze", type="primary", use_container_width=True):
+    # 3. Analyze Button
+    if st.button("🚀 Analyze Portfolio", type="primary", use_container_width=True):
         if edited_df.empty: 
             st.error("Add stocks first.")
         else:
@@ -597,9 +593,33 @@ with input_tab:
             res = optimize_portfolio(ts, hs)
             if res[0]: 
                 st.session_state.results = res
-                st.success("Success! Go to Results tab.")
+                st.success("Optimization Complete!")
             else: 
                 st.error("Optimization failed.")
+
+    # 4. Results Section (Appears Below)
+    if 'results' in st.session_state and st.session_state.results is not None:
+        st.divider()
+        st.subheader("📊 Optimization Results")
+        
+        portfolios, total_val, prices, fig = st.session_state.results
+        
+        # Display Chart (Square for Mobile)
+        st.pyplot(fig, use_container_width=True)
+        
+        t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
+        scenarios = [
+            (t1, 'low_risk', "Low Risk"), 
+            (t2, 'medium_risk', "Balanced"), 
+            (t3, 'high_risk', "High Risk")
+        ]
+        
+        for tab, key, name in scenarios:
+            p = portfolios[key]
+            plan = calculate_rebalancing_plan(p['weights'], prices, 
+                {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
+                total_val, p['performance'][0])
+            display_portfolio_results(tab, name, p['performance'], p['weights'], plan)
 
 # --- TAB 2: RESULTS ---
 with results_tab:
