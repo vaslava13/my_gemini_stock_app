@@ -546,27 +546,28 @@ input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
 # --- TAB 1: INPUT ---
 with input_tab:
     st.markdown("### Enter your Portfolio")
-    
-    # Recalculate weights dynamically based on current data
+
+    # --- 1. CALCULATE & DISPLAY TOTAL (TOP) ---
     curr_df = st.session_state.portfolio_data
     
-    # Ensure calculation works even if empty
-    if not curr_df.empty:
-        # Calculate Total Value for each row
+    # Recalculate totals based on current shares/prices
+    if not curr_df.empty and 'Price' in curr_df.columns:
         curr_df['Total Value'] = curr_df['Shares'] * curr_df['Price']
-        
-        # Calculate Grand Total
         grand_total = curr_df['Total Value'].sum()
         
-        # Calculate Weights (Avoid division by zero)
+        # Calculate Weights for the progress bar
         if grand_total > 0:
             curr_df['Weight'] = (curr_df['Total Value'] / grand_total) * 100
         else:
             curr_df['Weight'] = 0.0
             
+        # DISPLAY THE TOTAL VALUE
+        st.metric("Total Portfolio Value", f"${grand_total:,.2f}")
+    
+    # Update session state with clean calculations before showing editor
     st.session_state.portfolio_data = curr_df
 
-    # Configure the editor
+    # --- 2. DATA EDITOR ---
     edited_df = st.data_editor(
         st.session_state.portfolio_data,
         num_rows="dynamic",
@@ -576,28 +577,29 @@ with input_tab:
             "Shares": st.column_config.NumberColumn("Shares", min_value=0, step=1, required=True),
             "Price": st.column_config.NumberColumn("Price", format="$%.2f", disabled=True),
             "Total Value": st.column_config.NumberColumn("Total Value", format="$%.2f", disabled=True),
-            # FIX IS HERE: Removed 'disabled=True'
-            "Weight": st.column_config.ProgressColumn(
-                "Weight", 
-                format="%.2f%%", 
-                min_value=0, 
-                max_value=100
-            )
+            "Weight": st.column_config.ProgressColumn("Weight", format="%.2f%%", min_value=0, max_value=100)
         }
     )
-    
-    st.session_state.portfolio_data = edited_df
 
+    # Trigger an instant update if the user changes anything
+    if not edited_df.equals(st.session_state.portfolio_data):
+        st.session_state.portfolio_data = edited_df
+        st.rerun()
+
+    # --- 3. ANALYZE BUTTON ---
     if st.button("🚀 Analyze", type="primary", use_container_width=True):
-        if edited_df.empty: st.error("Add stocks first.")
+        if edited_df.empty: 
+            st.error("Add stocks first.")
         else:
             ts = [t.upper() for t in edited_df["Ticker"].tolist() if t]
             hs = {row["Ticker"].upper(): row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
+            
             res = optimize_portfolio(ts, hs)
             if res[0]: 
                 st.session_state.results = res
                 st.success("Success! Go to Results tab.")
-            else: st.error("Optimization failed.")
+            else: 
+                st.error("Optimization failed.")
 
 # --- TAB 2: RESULTS ---
 with results_tab:
