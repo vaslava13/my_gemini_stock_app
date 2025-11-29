@@ -497,8 +497,10 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
         st.error(f"An error occurred: {e}")
 
 # --- MAIN APPLICATION LOGIC ---
+# --- INITIALIZE PORTFOLIO WITH LIVE VALUES ---
 if 'portfolio_data' not in st.session_state:
-    st.session_state.portfolio_data = pd.DataFrame([
+    # 1. Define the initial holdings
+    initial_holdings = [
         {"Ticker": "AAPL", "Shares": 15},
         {"Ticker": "MSFT", "Shares": 20},
         {"Ticker": "GOOGL", "Shares": 30},
@@ -506,7 +508,31 @@ if 'portfolio_data' not in st.session_state:
         {"Ticker": "SLF", "Shares": 95},
         {"Ticker": "ENB", "Shares": 47},
         {"Ticker": "AMZN", "Shares": 5}
-    ])
+    ]
+    
+    df = pd.DataFrame(initial_holdings)
+    
+    # 2. Fetch live closing prices
+    tickers_list = df['Ticker'].tolist()
+    try:
+        # Fetch 1 day of data to get the latest close
+        market_data = yf.download(tickers_list, period="1d", progress=False)['Close'].iloc[-1]
+        
+        # 3. Map prices to the DataFrame
+        # We use .get(t, 0) to handle cases where a ticker might fail to download
+        df['Price'] = df['Ticker'].apply(lambda t: market_data.get(t, 0.0))
+        
+        # 4. Calculate Total Value
+        df['Total Value'] = df['Shares'] * df['Price']
+        
+    except Exception as e:
+        # Fallback if API fails (set prices to 0 so app doesn't crash)
+        df['Price'] = 0.0
+        df['Total Value'] = 0.0
+        print(f"Error fetching initial prices: {e}")
+
+    # 5. Save to session state
+    st.session_state.portfolio_data = df
 
 st.title("💰 AI FINANCIAL TOOL & PORTFOLIO OPTIMIZER")
 
