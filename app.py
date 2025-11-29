@@ -536,7 +536,7 @@ if 'portfolio_data' not in st.session_state:
 
 st.title("💰 AI FINANCIAL TOOL & PORTFOLIO OPTIMIZER")
 
-input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
+input_tab, compare_tab, deep_dive_tab = st.tabs([
     "✏️ Define & 📊 Optimize Portfolio ", 
     "🔍 Stock Comparison",
     "📊 Single Stock Deep Dive"
