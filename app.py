@@ -648,8 +648,6 @@ with input_tab:
             st.session_state.results = None
             st.rerun()
 
-    # === RIGHT: NEW PORTFOLIO ===
-    #with col2:
         st.markdown("### 2️⃣ New Portfolio")
         st.caption("Add stocks or change shares to compare.")
         
