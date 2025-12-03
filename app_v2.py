@@ -24,8 +24,30 @@ except (FileNotFoundError, KeyError):
     st.error("Secrets not found. Please add them to .streamlit/secrets.toml (local) or Streamlit Cloud Secrets.")
     st.stop()
 
-# --- HELPER FUNCTIONS (NEWS & AI) ---
+# --- MOBILE CHART HELPER ---
+def make_mobile_chart(fig, height=500, title=None):
+    """
+    Optimizes Plotly charts for mobile:
+    - Pan instead of Zoom (prevents scroll trapping)
+    - Bottom Legend (saves horizontal space)
+    - Tight margins
+    """
+    if title: fig.update_layout(title=title)
+    fig.update_layout(
+        height=height,
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=50, b=10),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=-0.2, # Legend below chart
+            xanchor="center", x=0.5
+        ),
+        dragmode='pan', # Crucial for mobile scrolling
+        hovermode="x unified"
+    )
+    return fig
 
+# --- HELPER FUNCTIONS (NEWS & AI) ---
 def fetch_news_from_api(ticker_symbol, company_name):
     """Fetches news articles from NewsAPI."""
     if NEWS_API_KEY == "YOUR_NEWS_API_KEY":
@@ -504,7 +526,7 @@ if 'portfolio_data' not in st.session_state:
         {"Ticker": "AAPL", "Shares": 15},
         {"Ticker": "MSFT", "Shares": 20},
         {"Ticker": "GOOGL", "Shares": 30},
-        {"Ticker": "NVDA", "Shares": 48},
+        {"Ticker": "NVDA", "Shares": 798},
         {"Ticker": "SLF", "Shares": 95},
         {"Ticker": "ENB", "Shares": 47},
         {"Ticker": "AMZN", "Shares": 5}
@@ -536,89 +558,120 @@ if 'portfolio_data' not in st.session_state:
 
 st.title("💰 AI FINANCIAL TOOL & PORTFOLIO OPTIMIZER")
 
-input_tab, results_tab, compare_tab, deep_dive_tab = st.tabs([
-    "✏️ Edit Portfolio", 
-    "📈 Analysis Results", 
+input_tab, compare_tab, deep_dive_tab = st.tabs([
+    "✏️ Define & 📊 Optimize Portfolio ", 
     "🔍 Stock Comparison",
     "📊 Single Stock Deep Dive"
 ])
 
-# --- TAB 1: INPUT ---
+# --- TAB 1: DASHBOARD (Merged Input + Results) ---
 with input_tab:
     st.markdown("### Enter your Portfolio")
     
-    # Recalculate weights dynamically based on current data
-    curr_df = st.session_state.portfolio_data
-    
-    # Ensure calculation works even if empty
-    if not curr_df.empty:
-        # Calculate Total Value for each row
-        curr_df['Total Value'] = curr_df['Shares'] * curr_df['Price']
-        
-        # Calculate Grand Total
-        grand_total = curr_df['Total Value'].sum()
-        
-        # Calculate Weights (Avoid division by zero)
-        if grand_total > 0:
-            curr_df['Weight'] = (curr_df['Total Value'] / grand_total) * 100
-        else:
-            curr_df['Weight'] = 0.0
-            
-    st.session_state.portfolio_data = curr_df
+    # 1. Load current data
+    curr_df = st.session_state.portfolio_data.copy()
 
-    # Configure the editor
+    # 2. Configure Editor
     edited_df = st.data_editor(
-        st.session_state.portfolio_data,
+        curr_df,
         num_rows="dynamic",
         use_container_width=True,
+        key="portfolio_editor", # Unique key to track state
         column_config={
             "Ticker": st.column_config.TextColumn("Ticker", required=True),
             "Shares": st.column_config.NumberColumn("Shares", min_value=0, step=1, required=True),
             "Price": st.column_config.NumberColumn("Price", format="$%.2f", disabled=True),
             "Total Value": st.column_config.NumberColumn("Total Value", format="$%.2f", disabled=True),
-            # FIX IS HERE: Removed 'disabled=True'
-            "Weight": st.column_config.ProgressColumn(
-                "Weight", 
-                format="%.2f%%", 
-                min_value=0, 
-                max_value=100
-            )
+            "Weight": st.column_config.ProgressColumn("Weight", format="%.2f%%", min_value=0, max_value=100)
         }
     )
-    
-    st.session_state.portfolio_data = edited_df
 
-    if st.button("🚀 Analyze", type="primary", use_container_width=True):
-        if edited_df.empty: st.error("Add stocks first.")
+    # 3. AUTO-UPDATE LOGIC
+    # Check if the data has changed from the previous state
+    if not edited_df.equals(st.session_state.portfolio_data):
+        
+        # A. Clean up inputs (remove empty rows, uppercase tickers)
+        edited_df = edited_df.dropna(subset=['Ticker'])
+        edited_df['Ticker'] = edited_df['Ticker'].astype(str).str.upper()
+        
+        # B. Detect rows that need price updates (New rows or rows with 0 price)
+        # We assume if Price is NaN or 0, it needs fetching
+        for index, row in edited_df.iterrows():
+            ticker = row['Ticker']
+            price = row.get('Price', 0.0)
+            
+            # If valid ticker but no price, fetch it immediately
+            if ticker and (pd.isna(price) or price == 0):
+                try:
+                    with st.spinner(f"Fetching price for {ticker}..."):
+                        data = yf.download(ticker, period="1d", progress=False)
+                        if not data.empty:
+                            # Update the price in the dataframe
+                            new_price = data['Close'].iloc[-1]
+                            edited_df.at[index, 'Price'] = float(new_price)
+                        else:
+                            st.toast(f"⚠️ Could not find ticker: {ticker}", icon="⚠️")
+                except Exception:
+                    pass
+
+        # C. Recalculate Totals & Weights
+        edited_df['Total Value'] = edited_df['Shares'] * edited_df['Price']
+        grand_total = edited_df['Total Value'].sum()
+        
+        if grand_total > 0:
+            edited_df['Weight'] = (edited_df['Total Value'] / grand_total) * 100
         else:
-            ts = [t.upper() for t in edited_df["Ticker"].tolist() if t]
-            hs = {row["Ticker"].upper(): row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
+            edited_df['Weight'] = 0.0
+
+        # D. Save & Rerun to show updated numbers
+        st.session_state.portfolio_data = edited_df
+        st.session_state.results = None # Reset analysis results since data changed
+        st.rerun()
+
+    # Display Grand Total at top (calculated from the edited df)
+    total_val = edited_df['Total Value'].sum() if not edited_df.empty else 0
+    st.metric("Total Portfolio Value", f"${total_val:,.2f}")
+
+    # 4. Analyze Button
+    if st.button("🚀 Analyze Portfolio", type="primary", use_container_width=True):
+        if edited_df.empty: 
+            st.error("Add stocks first.")
+        else:
+            # Prepare inputs for optimization
+            ts = [t for t in edited_df["Ticker"].tolist() if t]
+            hs = {row["Ticker"]: row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
+            
             res = optimize_portfolio(ts, hs)
             if res[0]: 
                 st.session_state.results = res
-                st.success("Success! Go to Results tab.")
-            else: st.error("Optimization failed.")
+                st.success("Optimization Complete!")
+            else: 
+                st.error("Optimization failed.")
 
-# --- TAB 2: RESULTS ---
-with results_tab:
+    # 5. Results Section
     if 'results' in st.session_state and st.session_state.results is not None:
-        portfolios, total_val, latest_prices, fig = st.session_state.results
-        st.success(f"**Current Portfolio Value:** ${total_val:,.2f}")
-        st.pyplot(fig)
         st.divider()
+        st.subheader("📊 Optimization Results")
+        
+        portfolios, total_val_opt, prices, fig = st.session_state.results
+        
+        # Display Old Style Matplotlib Chart (Square for Mobile)
+        st.pyplot(fig, use_container_width=True)
+        
         t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
-        scenarios = [(t1, 'low_risk', "Lowest Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
+        scenarios = [
+            (t1, 'low_risk', "Low Risk"), 
+            (t2, 'medium_risk', "Balanced"), 
+            (t3, 'high_risk', "High Risk")
+        ]
+        
         for tab, key, name in scenarios:
-            p_data = portfolios[key]
-            rebal_plan = calculate_rebalancing_plan(
-                p_data['weights'], latest_prices, 
+            p = portfolios[key]
+            plan = calculate_rebalancing_plan(p['weights'], prices, 
                 {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
-                total_val, p_data['performance'][0]
-            )
-            display_portfolio_results(tab, name, p_data['performance'], p_data['weights'], rebal_plan)
-    else:
-        st.info("👈 Please go to the 'Edit Portfolio' tab and click 'Analyze Portfolio'.")
-
+                total_val_opt, p['performance'][0])
+            display_portfolio_results(tab, name, p['performance'], p['weights'], plan)
+            
 # --- TAB 3: COMPARISON ---
 with compare_tab:
     st.header("Compare Stock Performance")
