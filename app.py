@@ -781,7 +781,8 @@ with input_tab:
     if 'results' in st.session_state and st.session_state.results is not None:
         st.divider()
         st.subheader("📊 Optimization Results")
-        portfolios, total_val, prices, fig = st.session_state.results
+        #portfolios, total_val, prices, fig = st.session_state.results
+        portfolios, total_val, _, prices, fig = st.session_state.results
         
         # Display Interactive Plotly Chart (Mobile Friendly)
         st.plotly_chart(fig, use_container_width=True)
