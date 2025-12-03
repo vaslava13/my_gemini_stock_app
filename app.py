@@ -617,7 +617,7 @@ with input_tab:
         return df, df['Total Value'].sum()
 
     # --- LAYOUT: TWO COLUMNS ---
-    col1 = st.columns(1)
+    col1, col2 = st.columns(2)
 
     # === LEFT: BASELINE PORTFOLIO ===
     with col1:
@@ -648,6 +648,7 @@ with input_tab:
             st.session_state.results = None
             st.rerun()
 
+    with col2:    
         st.markdown("### 2️⃣ New Portfolio")
         st.caption("Add stocks or change shares to compare.")
         
