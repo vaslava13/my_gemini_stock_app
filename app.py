@@ -329,13 +329,16 @@ def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_v
                 
     return target_data
 
-def display_portfolio_results(tab, name, perf, weights, rebal_data):
+def display_portfolio_results(tab, name, perf, weights, rebal_data, total_value):
     with tab:
         st.subheader(f"{name}")
-        c1, c2, c3 = st.columns(3)
+        
+        # Updated to 4 Columns to include Total Value
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Return", f"{perf[0]*100:.1f}%")
         c2.metric("Risk", f"{perf[1]*100:.1f}%")
         c3.metric("Sharpe", f"{perf[2]:.2f}")
+        c4.metric("Total Value", f"${total_value:,.2f}")
         
         # --- PIE CHART (Standard, No Hole) ---
         active_w = {k: v*100 for k, v in weights.items() if v > 0.001}
@@ -343,7 +346,7 @@ def display_portfolio_results(tab, name, perf, weights, rebal_data):
         fig = go.Figure(data=[go.Pie(
             labels=list(active_w.keys()),
             values=list(active_w.values()),
-            hole=0, # 0 = Full Pie, 0.4 = Donut
+            hole=0, # 0 = Full Pie
             textinfo='label+percent',
             hoverinfo='label+percent+value',
             marker=dict(line=dict(color='#000000', width=2))
