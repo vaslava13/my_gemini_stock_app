@@ -303,7 +303,7 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
         
         # Clean Legend
-        ax.legend(loc='best', frameon=True, framealpha=0.9, shadow=True, fancybox=True)
+        ax.legend(loc='best', frameon=True, framealpha=0.9, shadow=True, fancybox=True, color='white')
         
         plt.tight_layout()
 
