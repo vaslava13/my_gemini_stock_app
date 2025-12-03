@@ -778,7 +778,6 @@ with input_tab:
                 st.error("Optimization failed.")
 
     # --- RESULTS SECTION ---
-    with results_tab:
         if 'results' in st.session_state:
             portfolios, total_val, prices, fig = st.session_state.results
             
