@@ -300,22 +300,34 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         return None, None, None, None, None
 
 def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_value, expected_return):
-    rebal_data = []
-    for ticker in latest_prices.index:
-        optimal_weight = weights.get(ticker, 0)
-        current_shares = current_holdings.get(ticker, 0)
-        target_value = total_value * optimal_weight
-        current_price = latest_prices.get(ticker, 0)
-        if current_price > 0:
-            target_shares = target_value / current_price
-            shares_to_trade = target_shares - current_shares
-            price_target = current_price * (1 + expected_return)
-            if abs(shares_to_trade) > 0.01:
-                rebal_data.append({
-                    "Ticker": ticker, "Action": "Buy" if shares_to_trade > 0 else "Sell",
-                    "Shares to Trade": float(f"{abs(shares_to_trade):.2f}"), "Target Price (1Y)": float(f"{price_target:.2f}")
+    """
+    Calculates the TARGET portfolio structure:
+    Ticker, Target Share Count, and Total Position Value.
+    """
+    target_data = []
+    
+    # Sort weights to show largest holdings first
+    sorted_weights = sorted(weights.items(), key=lambda x: x[1], reverse=True)
+    
+    for ticker, weight in sorted_weights:
+        # Only include stocks with a significant allocation (>0.1%)
+        if weight > 0.001:
+            price = latest_prices.get(ticker, 0)
+            
+            if price > 0:
+                # Calculate Target Value for this stock based on optimal weight
+                position_value = total_value * weight
+                
+                # Calculate Number of Shares to own
+                target_shares = position_value / price
+                
+                target_data.append({
+                    "Ticker": ticker,
+                    "Shares": float(f"{target_shares:.2f}"),
+                    "Total Value": float(f"{position_value:.2f}")
                 })
-    return rebal_data
+                
+    return target_data
 
 def display_portfolio_results(tab, name, perf, weights, rebal_data):
     with tab:
@@ -325,13 +337,13 @@ def display_portfolio_results(tab, name, perf, weights, rebal_data):
         c2.metric("Risk", f"{perf[1]*100:.1f}%")
         c3.metric("Sharpe", f"{perf[2]:.2f}")
         
-        # --- UPDATED: PIE CHART (Mobile Friendly Donut) ---
+        # --- PIE CHART (Standard, No Hole) ---
         active_w = {k: v*100 for k, v in weights.items() if v > 0.001}
         
         fig = go.Figure(data=[go.Pie(
             labels=list(active_w.keys()),
             values=list(active_w.values()),
-            hole=0.4, # Donut style
+            hole=0, # 0 = Full Pie, 0.4 = Donut
             textinfo='label+percent',
             hoverinfo='label+percent+value',
             marker=dict(line=dict(color='#000000', width=2))
@@ -341,17 +353,27 @@ def display_portfolio_results(tab, name, perf, weights, rebal_data):
             title="Recommended Allocation",
             height=400,
             template="plotly_dark",
-            margin=dict(l=10, r=10, t=50, b=10),
-            showlegend=False # Labels on chart are better for mobile than a separate legend
+            margin=dict(l=20, r=20, t=50, b=20),
+            showlegend=False
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Display Rebalancing Table
-        if rebal_data: 
-            st.dataframe(pd.DataFrame(rebal_data), use_container_width=True)
+        # --- SIMPLIFIED TABLE ---
+        if rebal_data:
+            st.markdown("##### Target Portfolio Structure")
+            st.dataframe(
+                pd.DataFrame(rebal_data), 
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Ticker": "Ticker",
+                    "Shares": st.column_config.NumberColumn("Shares", format="%.2f"),
+                    "Total Value": st.column_config.NumberColumn("Total Value", format="$%.2f")
+                }
+            )
         else: 
-            st.info("No rebalancing needed.")
+            st.info("No allocation data generated.")
 
 # --- HELPER FUNCTIONS (COMPARISON) ---
 def analyze_stock_comparison(tickers, period):
