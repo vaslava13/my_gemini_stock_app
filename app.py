@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
 from pypfopt import EfficientFrontier, risk_models, expected_returns
 from pypfopt.plotting import plot_efficient_frontier
+import matplotlib.ticker as mtick # Added for % formatting
+from pypfopt import CLA
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
@@ -182,8 +184,6 @@ def make_chart_responsive(fig, height=400):
     return fig
 
 def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01-01'):
-    from pypfopt import CLA  # Import Critical Line Algorithm for smooth curves
-    
     try:
         # 1. Combine tickers to fetch all data at once
         base_tickers = list(baseline_holdings.keys())
@@ -201,25 +201,20 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         latest_prices = df.iloc[-1]
 
         # --- BASELINE FRONTIER CALC ---
-        # Filter data for baseline stocks only
         valid_base = [t for t in base_tickers if t in df.columns]
         df_base = df[valid_base]
         
-        # Calc Baseline Stats
         mu_b = expected_returns.mean_historical_return(df_base)
         S_b = risk_models.sample_cov(df_base)
         
-        # Generate Curve Points using CLA (Critical Line Algorithm)
         cla_b = CLA(mu_b, S_b)
-        # We need to compute min/max for the frontier to avoid errors
         try:
             cla_b.min_volatility()
             cla_b.max_sharpe()
             ret_b, vol_b, _ = cla_b.efficient_frontier(points=50)
         except:
-            ret_b, vol_b = [], [] # Fallback if solver fails
+            ret_b, vol_b = [], []
 
-        # Calc Specific Baseline Portfolio Position
         val_b = sum(baseline_holdings[t] * latest_prices[t] for t in valid_base)
         w_b = pd.Series({t: (baseline_holdings[t] * latest_prices[t]) / val_b for t in valid_base}).reindex(valid_base, fill_value=0)
         curr_ret_b = np.sum(mu_b * w_b)
@@ -232,7 +227,6 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         mu_n = expected_returns.mean_historical_return(df_new)
         S_n = risk_models.sample_cov(df_new)
         
-        # Generate Curve Points
         cla_n = CLA(mu_n, S_n)
         try:
             cla_n.min_volatility()
@@ -241,13 +235,12 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         except:
             ret_n, vol_n = [], []
 
-        # Calc Specific New Portfolio Position
         val_n = sum(new_holdings[t] * latest_prices[t] for t in valid_new)
         w_n = pd.Series({t: (new_holdings[t] * latest_prices[t]) / val_n for t in valid_new}).reindex(valid_new, fill_value=0)
         curr_ret_n = np.sum(mu_n * w_n)
         curr_std_n = np.sqrt(np.dot(w_n.T, np.dot(S_n, w_n)))
 
-        # --- OPTIMIZATION STRATEGIES (Based on NEW Portfolio) ---
+        # --- OPTIMIZATION STRATEGIES ---
         portfolios = {}
         ef_low = EfficientFrontier(mu_n, S_n)
         ef_low.min_volatility()
@@ -258,7 +251,6 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
         ef_high = EfficientFrontier(mu_n, S_n)
-        # Target return logic
         min_r = portfolios['low_risk']['performance'][0]
         max_r = mu_n.max()
         try:
@@ -267,37 +259,61 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        # --- PLOTTING ---
-        plt.rcParams.update({'font.size': 14, 'axes.labelsize': 14, 'axes.titlesize': 16, 'legend.fontsize': 12})
-        fig, ax = plt.subplots(figsize=(8, 8))
+        # --- IMPROVED PLOTTING ---
+        # Set a clean style
+        plt.style.use('seaborn-v0_8-whitegrid') 
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.size': 11})
         
-        # 1. Plot Frontiers
+        fig, ax = plt.subplots(figsize=(10, 7))
+        
+        # 1. Plot Frontiers (Grey for Old, Blue for New)
         if len(vol_b) > 0:
-            ax.plot(vol_b, ret_b, color='yellow', linestyle='--', linewidth=2, label='Baseline Frontier', alpha=0.7)
+            ax.plot(vol_b, ret_b, color='#95a5a6', linestyle='--', linewidth=2, label='Baseline Frontier', alpha=0.6)
         if len(vol_n) > 0:
-            ax.plot(vol_n, ret_n, color='cyan', linestyle='-', linewidth=3, label='New Frontier')
+            ax.plot(vol_n, ret_n, color='#2980b9', linestyle='-', linewidth=3, label='New Frontier')
 
-        # 2. Plot Current Positions
-        ax.scatter(curr_std_b, curr_ret_b, marker='D', s=200, c='yellow', edgecolors='black', label='Baseline Hold', zorder=5)
-        ax.scatter(curr_std_n, curr_ret_n, marker='P', s=250, c='cyan', edgecolors='black', label='New Hold', zorder=6)
+        # 2. Plot Current Positions with Annotation
+        # Baseline
+        ax.scatter(curr_std_b, curr_ret_b, marker='o', s=150, c='#7f8c8d', edgecolors='black', label='Baseline Hold', zorder=5)
+        ax.annotate(" Base", (curr_std_b, curr_ret_b), xytext=(5, 0), textcoords='offset points', fontsize=10, color='#555')
+        
+        # New
+        ax.scatter(curr_std_n, curr_ret_n, marker='o', s=200, c='#2980b9', edgecolors='black', label='New Hold', zorder=6)
+        ax.annotate(" Current", (curr_std_n, curr_ret_n), xytext=(5, 0), textcoords='offset points', fontsize=10, fontweight='bold', color='#2980b9')
 
-        # 3. Plot Optimal Points (New)
-        scenarios = [('low_risk', 'green', 'o'), ('medium_risk', 'blue', '*'), ('high_risk', 'red', 'X')]
-        for key, color, marker in scenarios:
+        # 3. Plot Optimal Points (Distinct Colors)
+        # Low Risk (Green), Max Sharpe (Purple), High Return (Red)
+        scenarios = [
+            ('low_risk', '#27ae60', 'Min Vol'), 
+            ('medium_risk', '#8e44ad', 'Max Sharpe'), 
+            ('high_risk', '#c0392b', 'High Ret')
+        ]
+        
+        for key, color, label in scenarios:
             r, v, _ = portfolios[key]['performance']
-            ax.scatter(v, r, marker=marker, s=200, c=color, label=f"Opt: {key.replace('_',' ').title()}", zorder=7)
+            ax.scatter(v, r, marker='*', s=250, c=color, edgecolors='white', linewidth=1, label=f"{label}", zorder=7)
 
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=2)
-        ax.set_title("Efficient Frontier Comparison", pad=20)
-        ax.set_xlabel("Volatility (Risk)")
-        ax.set_ylabel("Expected Return")
+        # 4. Formatting
+        ax.set_title("Efficient Frontier Comparison", fontsize=16, fontweight='bold', pad=15)
+        ax.set_xlabel("Volatility (Risk)", fontsize=12)
+        ax.set_ylabel("Expected Return", fontsize=12)
+        
+        # Convert axes to percentages
+        ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+        ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+        
+        # Clean Legend
+        ax.legend(loc='best', frameon=True, framealpha=0.9, shadow=True, fancybox=True)
+        
         plt.tight_layout()
 
         return portfolios, val_b, val_n, latest_prices, fig
 
     except Exception as e:
-        print(e)
+        st.error(f"Optimization Error: {e}")
         return None, None, None, None, None
+
+# (Keep calculate_rebalancing_plan and display_portfolio_results exactly as they were)
 
 def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_value, expected_return):
     """
