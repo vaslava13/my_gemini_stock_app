@@ -43,7 +43,7 @@ def make_mobile_chart(fig, height=500, title=None):
         plot_bgcolor=bg_color,
         font=dict(
             size=14, 
-            color="black" # Black text for contrast
+            color="white" # Black text for contrast
         ),
         margin=dict(l=10, r=10, t=50, b=10),
         legend=dict(
