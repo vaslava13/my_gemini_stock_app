@@ -50,7 +50,7 @@ def make_mobile_chart(fig, height=500, title=None):
             orientation="h",
             yanchor="bottom", y=-0.25, 
             xanchor="center", x=0.5,
-            font=dict(size=14, color="black")
+            font=dict(size=14, color="white")
         ),
         dragmode='pan', 
         hovermode="x unified"
