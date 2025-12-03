@@ -778,34 +778,30 @@ with input_tab:
                 st.error("Optimization failed.")
 
     # --- RESULTS SECTION ---
-    if 'results' in st.session_state and st.session_state.results is not None:
-        st.divider()
-        st.subheader("📊 Comparison Results")
+    if 'results' in st.session_state:
+        portfolios, total_val, prices, fig = st.session_state.results
         
-        # Unpack results (Note: Added n_val for new portfolio value)
-        portfolios, b_val, n_val, prices, fig = st.session_state.results
+        # Metric is now inside the tabs, so we can remove it from here if preferred, 
+        # or keep it as a global summary. I'll leave the chart here.
         
-        # 1. Visual Comparison
+        # Display Old Style Matplotlib Chart (Square for Mobile)
         st.pyplot(fig, use_container_width=True)
         
-        # 2. Optimization Details
-        st.markdown("#### Optimization Strategies (Based on Combined Assets)")
         t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
-        
         scenarios = [
             (t1, 'low_risk', "Low Risk"), 
             (t2, 'medium_risk', "Balanced"), 
             (t3, 'high_risk', "High Risk")
         ]
         
-        # We calculate rebalancing based on the NEW portfolio targets
         for tab, key, name in scenarios:
             p = portfolios[key]
-            # Calculate plan to move from NEW holdings to OPTIMAL holdings
             plan = calculate_rebalancing_plan(p['weights'], prices, 
-                {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.new_portfolio_data.iterrows()},
-                n_val, p['performance'][0])
-            display_portfolio_results(tab, name, p['performance'], p['weights'], plan)
+                {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
+                total_val, p['performance'][0])
+            
+            # UPDATED CALL: Passing total_val as the last argument
+            display_portfolio_results(tab, name, p['performance'], p['weights'], plan, total_val)
 
 # --- TAB 3: COMPARISON ---
 with compare_tab:
