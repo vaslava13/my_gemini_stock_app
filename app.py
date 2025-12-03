@@ -29,22 +29,25 @@ except (FileNotFoundError, KeyError):
 # --- MOBILE CHART HELPER ---
 def make_mobile_chart(fig, height=500, title=None):
     """
-    Optimizes Plotly charts for mobile:
-    - Pan instead of Zoom (prevents scroll trapping)
-    - Bottom Legend (saves horizontal space)
-    - Tight margins
+    Optimizes Plotly charts for mobile with GREY BACKGROUND.
     """
     if title: fig.update_layout(title=title)
+    
+    # Grey Background Color
+    bg_color = '#333333'
+    
     fig.update_layout(
         height=height,
         template="plotly_dark",
+        paper_bgcolor=bg_color, # Background of the whole area
+        plot_bgcolor=bg_color,  # Background of the chart grid
         margin=dict(l=10, r=10, t=50, b=10),
         legend=dict(
             orientation="h",
-            yanchor="bottom", y=-0.2, # Legend below chart
+            yanchor="bottom", y=-0.2, 
             xanchor="center", x=0.5
         ),
-        dragmode='pan', # Crucial for mobile scrolling
+        dragmode='pan', 
         hovermode="x unified"
     )
     return fig
