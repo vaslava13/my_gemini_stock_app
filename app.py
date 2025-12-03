@@ -182,13 +182,15 @@ def make_chart_responsive(fig, height=400):
     return fig
 
 def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01-01'):
+    from pypfopt import CLA  # Import Critical Line Algorithm for smooth curves
+    
     try:
-        # 1. Combine tickers from both portfolios to get the full universe of data
-        baseline_tickers = list(baseline_holdings.keys())
+        # 1. Combine tickers to fetch all data at once
+        base_tickers = list(baseline_holdings.keys())
         new_tickers = list(new_holdings.keys()) if new_holdings else []
-        all_tickers = list(set(baseline_tickers + new_tickers))
+        all_tickers = list(set(base_tickers + new_tickers))
 
-        with st.spinner("Calculating comparison..."):
+        with st.spinner("Calculating efficient frontiers..."):
             df = yf.download(all_tickers, start=start_date, progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 try: df = df['Close']
@@ -196,86 +198,90 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
 
         if df.empty or df.shape[1] < 2: return None, None, None, None, None
         df = df.dropna(axis=1, how='all').dropna()
-
-        # 2. Get Latest Prices
         latest_prices = df.iloc[-1]
 
-        # 3. Calculate Baseline Metrics
-        b_valid = [t for t in baseline_tickers if t in latest_prices.index]
-        b_val = sum(baseline_holdings[t] * latest_prices[t] for t in b_valid)
-        b_weights = {t: (baseline_holdings[t] * latest_prices[t]) / b_val for t in b_valid}
+        # --- BASELINE FRONTIER CALC ---
+        # Filter data for baseline stocks only
+        valid_base = [t for t in base_tickers if t in df.columns]
+        df_base = df[valid_base]
         
-        # Add missing tickers to weights with 0 value (needed for matrix math)
-        b_weights_series = pd.Series(b_weights).reindex(df.columns, fill_value=0)
-
-        # 4. Core Calculations (Efficient Frontier)
-        mu = expected_returns.mean_historical_return(df)
-        S = risk_models.sample_cov(df)
-
-        # 5. Calculate New Portfolio Metrics (If it exists)
-        n_val = 0
-        n_weights = {}
-        n_weights_series = None
+        # Calc Baseline Stats
+        mu_b = expected_returns.mean_historical_return(df_base)
+        S_b = risk_models.sample_cov(df_base)
         
-        if new_holdings:
-            n_valid = [t for t in new_tickers if t in latest_prices.index]
-            n_val = sum(new_holdings[t] * latest_prices[t] for t in n_valid)
-            n_weights = {t: (new_holdings[t] * latest_prices[t]) / n_val for t in n_valid}
-            n_weights_series = pd.Series(n_weights).reindex(df.columns, fill_value=0)
+        # Generate Curve Points using CLA (Critical Line Algorithm)
+        cla_b = CLA(mu_b, S_b)
+        # We need to compute min/max for the frontier to avoid errors
+        try:
+            cla_b.min_volatility()
+            cla_b.max_sharpe()
+            ret_b, vol_b, _ = cla_b.efficient_frontier(points=50)
+        except:
+            ret_b, vol_b = [], [] # Fallback if solver fails
 
-        # 6. Optimize (Using the full universe of stocks)
+        # Calc Specific Baseline Portfolio Position
+        val_b = sum(baseline_holdings[t] * latest_prices[t] for t in valid_base)
+        w_b = pd.Series({t: (baseline_holdings[t] * latest_prices[t]) / val_b for t in valid_base}).reindex(valid_base, fill_value=0)
+        curr_ret_b = np.sum(mu_b * w_b)
+        curr_std_b = np.sqrt(np.dot(w_b.T, np.dot(S_b, w_b)))
+
+        # --- NEW PORTFOLIO FRONTIER CALC ---
+        valid_new = [t for t in new_tickers if t in df.columns]
+        df_new = df[valid_new]
+        
+        mu_n = expected_returns.mean_historical_return(df_new)
+        S_n = risk_models.sample_cov(df_new)
+        
+        # Generate Curve Points
+        cla_n = CLA(mu_n, S_n)
+        try:
+            cla_n.min_volatility()
+            cla_n.max_sharpe()
+            ret_n, vol_n, _ = cla_n.efficient_frontier(points=50)
+        except:
+            ret_n, vol_n = [], []
+
+        # Calc Specific New Portfolio Position
+        val_n = sum(new_holdings[t] * latest_prices[t] for t in valid_new)
+        w_n = pd.Series({t: (new_holdings[t] * latest_prices[t]) / val_n for t in valid_new}).reindex(valid_new, fill_value=0)
+        curr_ret_n = np.sum(mu_n * w_n)
+        curr_std_n = np.sqrt(np.dot(w_n.T, np.dot(S_n, w_n)))
+
+        # --- OPTIMIZATION STRATEGIES (Based on NEW Portfolio) ---
         portfolios = {}
-        
-        # Low Risk
-        ef_low = EfficientFrontier(mu, S)
+        ef_low = EfficientFrontier(mu_n, S_n)
         ef_low.min_volatility()
         portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
-        # Medium Risk
-        ef_med = EfficientFrontier(mu, S)
+        ef_med = EfficientFrontier(mu_n, S_n)
         ef_med.max_sharpe()
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
-        # High Risk
-        min_ret, _, _ = portfolios['low_risk']['performance']
-        ef_high = EfficientFrontier(mu, S)
+        ef_high = EfficientFrontier(mu_n, S_n)
+        # Target return logic
+        min_r = portfolios['low_risk']['performance'][0]
+        max_r = mu_n.max()
         try:
-            ef_high.efficient_return(min_ret + 0.8 * (mu.max() - min_ret))
+            ef_high.efficient_return(min_r + 0.8 * (max_r - min_r))
             portfolios['high_risk'] = {'weights': ef_high.clean_weights(), 'performance': ef_high.portfolio_performance()}
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
         # --- PLOTTING ---
         plt.rcParams.update({'font.size': 14, 'axes.labelsize': 14, 'axes.titlesize': 16, 'legend.fontsize': 12})
-        fig, ax = plt.subplots(figsize=(8, 8)) 
-        plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
+        fig, ax = plt.subplots(figsize=(8, 8))
         
-        # Plot Optimal Markers
-        scenarios = [('low_risk', 'Lowest Risk', 'green', 'o'), ('medium_risk', 'Max Sharpe', 'blue', '*'), ('high_risk', 'High Risk', 'red', 'X')]
-        for key, label, color, marker in scenarios:
-            r, v, _ = portfolios[key]['performance']
-            ax.scatter(v, r, marker=marker, s=200, c=color, label=label, zorder=5)
-        
-        # Plot Baseline Portfolio
-        b_ret = np.sum(mu * b_weights_series)
-        b_std = np.sqrt(np.dot(b_weights_series.T, np.dot(S, b_weights_series)))
-        ax.scatter(b_std, b_ret, marker='D', s=250, c='yellow', edgecolors='black', label='Baseline Portfolio', zorder=6)
+        # 1. Plot Frontiers
+        if len(vol_b) > 0:
+            ax.plot(vol_b, ret_b, color='yellow', linestyle='--', linewidth=2, label='Baseline Frontier', alpha=0.7)
+        if len(vol_n) > 0:
+            ax.plot(vol_n, ret_n, color='cyan', linestyle='-', linewidth=3, label='New Frontier')
 
-        # Plot New Portfolio (If exists)
-        if n_weights_series is not None:
-            n_ret = np.sum(mu * n_weights_series)
-            n_std = np.sqrt(np.dot(n_weights_series.T, np.dot(S, n_weights_series)))
-            ax.scatter(n_std, n_ret, marker='P', s=250, c='cyan', edgecolors='black', label='New Portfolio', zorder=6)
+        # 2. Plot Current Positions
+        ax.scatter(curr_std_b, curr_ret_b, marker='D', s=200, c='yellow', edgecolors='black', label='Baseline Hold', zorder=5)
+        ax.scatter(curr_std_n, curr_ret_n, marker='P', s=250, c='cyan', edgecolors='black', label='New Hold', zorder=6)
 
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=2)
-        ax.set_title("Portfolio Comparison", pad=20)
-        plt.tight_layout()
-
-        return portfolios, b_val, n_val, latest_prices, fig
-
-    except Exception as e: 
-        print(e)
-        return None, None, None, None, None
+        # 3. Plot Optimal Points
 
 def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_value, expected_return):
     rebal_data = []
