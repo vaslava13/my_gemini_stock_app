@@ -303,7 +303,20 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
         
         # Clean Legend
-        ax.legend(loc='best', frameon=True, framealpha=0.9, shadow=True, fancybox=True, color='white')
+        #ax.legend(loc='best', frameon=True, framealpha=0.9, shadow=True, fancybox=True)
+
+        # 6. --- FIXED LEGEND CODE ---
+        ax.legend(
+            loc='upper center', 
+            bbox_to_anchor=(0.5, -0.15), 
+            fancybox=True, 
+            shadow=True, 
+            ncol=2, 
+            facecolor='#333333',   # Dark Grey Background
+            edgecolor='white',     # White Border
+            labelcolor='white',    # White Text
+            scatterpoints=1        # Shows 1 icon per label (Fixes missing/duplicate icons)
+        )
         
         plt.tight_layout()
 
