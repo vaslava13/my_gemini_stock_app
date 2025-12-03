@@ -294,9 +294,9 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
             ax.scatter(v, r, marker='*', s=250, c=color, edgecolors='white', linewidth=1, label=f"{label}", zorder=7)
 
         # 4. Formatting
-        ax.set_title("Efficient Frontier Comparison", fontsize=16, fontweight='bold', pad=15)
-        ax.set_xlabel("Volatility (Risk)", fontsize=12)
-        ax.set_ylabel("Expected Return", fontsize=12)
+        ax.set_title("Efficient Frontier Comparison", fontsize=16, fontweight='bold', pad=15, color='white')
+        ax.set_xlabel("Volatility (Risk)", fontsize=12, color='white')
+        ax.set_ylabel("Expected Return", fontsize=12, color='white')
         
         # Convert axes to percentages
         ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
