@@ -268,17 +268,17 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         
         # 1. Plot Frontiers (Grey for Old, Blue for New)
         if len(vol_b) > 0:
-            ax.plot(vol_b, ret_b, color='#95a5a6', linestyle='--', linewidth=2, label='Baseline Frontier', alpha=0.6)
+            ax.plot(vol_b, ret_b, color="#b9e713", linestyle='--', linewidth=2, label='Baseline Frontier', alpha=0.6)
         if len(vol_n) > 0:
             ax.plot(vol_n, ret_n, color='#2980b9', linestyle='-', linewidth=3, label='New Frontier')
 
         # 2. Plot Current Positions with Annotation
         # Baseline
-        ax.scatter(curr_std_b, curr_ret_b, marker='o', s=150, c='#7f8c8d', edgecolors='black', label='Baseline Hold', zorder=5)
+        ax.scatter(curr_std_b, curr_ret_b, marker='o', s=150, c="#bdf53b", edgecolors='black', label='Baseline Hold', zorder=5)
         ax.annotate(" Base", (curr_std_b, curr_ret_b), xytext=(5, 0), textcoords='offset points', fontsize=10, color='#555')
         
         # New
-        ax.scatter(curr_std_n, curr_ret_n, marker='o', s=200, c='#2980b9', edgecolors='black', label='New Hold', zorder=6)
+        ax.scatter(curr_std_n, curr_ret_n, marker='o', s=200, c="#0361a0", edgecolors='black', label='New Hold', zorder=6)
         ax.annotate(" Current", (curr_std_n, curr_ret_n), xytext=(5, 0), textcoords='offset points', fontsize=10, fontweight='bold', color='#2980b9')
 
         # 3. Plot Optimal Points (Distinct Colors)
