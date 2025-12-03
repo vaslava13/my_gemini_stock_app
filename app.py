@@ -317,19 +317,41 @@ def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_v
                 })
     return rebal_data
 
-def display_portfolio_results(tab, name, perf, weights, rebalancing_data):
+def display_portfolio_results(tab, name, perf, weights, rebal_data):
     with tab:
-        st.subheader(f"{name} Strategy")
+        st.subheader(f"{name}")
         c1, c2, c3 = st.columns(3)
-        c1.metric("Expected Return", f"{perf[0]*100:.2f}%")
-        c2.metric("Volatility (Risk)", f"{perf[1]*100:.2f}%")
-        c3.metric("Sharpe Ratio", f"{perf[2]:.2f}")
-        active_weights = {k: v*100 for k, v in weights.items() if v > 0.001}
-        st.bar_chart(pd.DataFrame.from_dict(active_weights, orient='index', columns=['Weight (%)']))
-        if rebalancing_data:
-            st.dataframe(pd.DataFrame(rebalancing_data), use_container_width=True)
-        else:
-            st.info("No significant rebalancing needed.")
+        c1.metric("Return", f"{perf[0]*100:.1f}%")
+        c2.metric("Risk", f"{perf[1]*100:.1f}%")
+        c3.metric("Sharpe", f"{perf[2]:.2f}")
+        
+        # --- UPDATED: PIE CHART (Mobile Friendly Donut) ---
+        active_w = {k: v*100 for k, v in weights.items() if v > 0.001}
+        
+        fig = go.Figure(data=[go.Pie(
+            labels=list(active_w.keys()),
+            values=list(active_w.values()),
+            hole=0.4, # Donut style
+            textinfo='label+percent',
+            hoverinfo='label+percent+value',
+            marker=dict(line=dict(color='#000000', width=2))
+        )])
+        
+        fig.update_layout(
+            title="Recommended Allocation",
+            height=400,
+            template="plotly_dark",
+            margin=dict(l=10, r=10, t=50, b=10),
+            showlegend=False # Labels on chart are better for mobile than a separate legend
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Display Rebalancing Table
+        if rebal_data: 
+            st.dataframe(pd.DataFrame(rebal_data), use_container_width=True)
+        else: 
+            st.info("No rebalancing needed.")
 
 # --- HELPER FUNCTIONS (COMPARISON) ---
 def analyze_stock_comparison(tickers, period):
