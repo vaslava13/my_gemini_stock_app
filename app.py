@@ -29,23 +29,28 @@ except (FileNotFoundError, KeyError):
 # --- MOBILE CHART HELPER ---
 def make_mobile_chart(fig, height=500, title=None):
     """
-    Optimizes Plotly charts for mobile with GREY BACKGROUND.
+    Optimizes Plotly charts for mobile with BRIGHT/WHITE BACKGROUND.
     """
     if title: fig.update_layout(title=title)
     
-    # Grey Background Color
-    bg_color = '#333333'
+    # Bright Background Color
+    bg_color = '#FFFFFF'
     
     fig.update_layout(
         height=height,
-        template="plotly_dark",
-        paper_bgcolor=bg_color, # Background of the whole area
-        plot_bgcolor=bg_color,  # Background of the chart grid
+        template="plotly_white", # Switch to White template
+        paper_bgcolor=bg_color, 
+        plot_bgcolor=bg_color,
+        font=dict(
+            size=14, 
+            color="black" # Black text for contrast
+        ),
         margin=dict(l=10, r=10, t=50, b=10),
         legend=dict(
             orientation="h",
-            yanchor="bottom", y=-0.2, 
-            xanchor="center", x=0.5
+            yanchor="bottom", y=-0.25, 
+            xanchor="center", x=0.5,
+            font=dict(size=14, color="black")
         ),
         dragmode='pan', 
         hovermode="x unified"
