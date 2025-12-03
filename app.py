@@ -657,7 +657,6 @@ with input_tab:
         
         # Show difference in value
         delta_val = new_total - base_total
-        #st.metric("New Value", f"${new_total:,.2f}", delta=f"${delta_val:,.2f}")
         # NEW (This handles the arrow automatically)
         st.metric("New Value", f"${new_total:,.2f}", delta=f"{delta_val:,.2f}")
 
