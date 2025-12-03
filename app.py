@@ -281,7 +281,23 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         ax.scatter(curr_std_b, curr_ret_b, marker='D', s=200, c='yellow', edgecolors='black', label='Baseline Hold', zorder=5)
         ax.scatter(curr_std_n, curr_ret_n, marker='P', s=250, c='cyan', edgecolors='black', label='New Hold', zorder=6)
 
-        # 3. Plot Optimal Points
+        # 3. Plot Optimal Points (New)
+        scenarios = [('low_risk', 'green', 'o'), ('medium_risk', 'blue', '*'), ('high_risk', 'red', 'X')]
+        for key, color, marker in scenarios:
+            r, v, _ = portfolios[key]['performance']
+            ax.scatter(v, r, marker=marker, s=200, c=color, label=f"Opt: {key.replace('_',' ').title()}", zorder=7)
+
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), fancybox=True, shadow=True, ncol=2)
+        ax.set_title("Efficient Frontier Comparison", pad=20)
+        ax.set_xlabel("Volatility (Risk)")
+        ax.set_ylabel("Expected Return")
+        plt.tight_layout()
+
+        return portfolios, val_b, val_n, latest_prices, fig
+
+    except Exception as e:
+        print(e)
+        return None, None, None, None, None
 
 def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_value, expected_return):
     rebal_data = []
