@@ -617,7 +617,7 @@ with input_tab:
         return df, df['Total Value'].sum()
 
     # --- LAYOUT: TWO COLUMNS ---
-    col1 = st.columns()
+    col1 = st.columns(1)
 
     # === LEFT: BASELINE PORTFOLIO ===
     with col1:
