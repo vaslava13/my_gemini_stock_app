@@ -491,6 +491,53 @@ def analyze_stock_comparison(tickers, period):
     except Exception as e:
         st.error(f"Error analyzing stocks: {e}")
         return None, None, None
+    
+def get_fundamental_comparison(tickers):
+    """Fetches key fundamentals (P/E, Market Cap, etc.) for a list of tickers."""
+    data = []
+    
+    # Use yf.Tickers to optimize slightly, though .info still requires individual calls usually
+    for symbol in tickers:
+        try:
+            stock = yf.Ticker(symbol)
+            info = stock.info
+            
+            data.append({
+                "Ticker": symbol,
+                "Market Cap": info.get("marketCap"),
+                "P/E (Trail)": info.get("trailingPE"),
+                "P/E (Fwd)": info.get("forwardPE"),
+                "PEG Ratio": info.get("pegRatio"),
+                "Price/Book": info.get("priceToBook"),
+                "ROE": info.get("returnOnEquity"),
+                "Div Yield": info.get("dividendYield"),
+                "Profit Margin": info.get("profitMargins")
+            })
+        except Exception:
+            continue
+            
+    df = pd.DataFrame(data)
+    if df.empty: return pd.DataFrame()
+    
+    # --- FORMATTING ---
+    # 1. Market Cap (Trillions/Billions)
+    def fmt_cap(x):
+        if not x or pd.isna(x): return "-"
+        if x >= 1e12: return f"${x/1e12:.2f}T"
+        if x >= 1e9: return f"${x/1e9:.2f}B"
+        return f"${x/1e6:.2f}M"
+        
+    df["Market Cap"] = df["Market Cap"].apply(fmt_cap)
+    
+    # 2. Percentages (ROE, Yield, Margins)
+    for col in ["ROE", "Div Yield", "Profit Margin"]:
+        df[col] = df[col].apply(lambda x: f"{x*100:.2f}%" if x and not pd.isna(x) else "-")
+        
+    # 3. Decimals (Ratios)
+    for col in ["P/E (Trail)", "P/E (Fwd)", "PEG Ratio", "Price/Book"]:
+         df[col] = df[col].apply(lambda x: f"{x:.2f}" if x and not pd.isna(x) else "-")
+         
+    return df.set_index("Ticker")
 
 # --- NEW HELPER FUNCTIONS (DEEP DIVE) ---
 def plot_price_history(hist_df, ticker_symbol):
@@ -898,6 +945,65 @@ with compare_tab:
     c1, c2 = st.columns([2, 2])
     with c1:
         default_tickers = [t for t in st.session_state.portfolio_data["Ticker"].unique() if t]
+        defaults = default_tickers[:3] if default_tickers else []
+        selected_tickers = st.multiselect("Select portfolio stocks:", default_tickers, default=defaults)
+        extra_tickers = st.text_input("Add other tickers (comma separated):")
+    with c2:
+        period = st.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
+
+    if st.button("🔎 Compare Stocks"):
+        final_tickers = list(set(selected_tickers + [t.strip().upper() for t in extra_tickers.split(",") if t.strip()]))
+        
+        if not final_tickers:
+            st.error("Select at least one ticker.")
+        else:
+            # 1. Fetch Technical Data
+            raw_data, norm_data, tech_summary = analyze_stock_comparison(final_tickers, period)
+            
+            if raw_data is not None:
+                # --- PLOT 1: NORMALIZED RETURNS ---
+                st.subheader("Performance Chart (Normalized Returns)")
+                fig_norm = go.Figure()
+                for ticker in norm_data.columns:
+                    fig_norm.add_trace(go.Scatter(
+                        x=norm_data.index, y=norm_data[ticker], mode='lines', name=ticker,
+                        hovertemplate=f'<b>{ticker}</b>: %{{y:.2f}}%<extra></extra>'
+                    ))
+                fig_norm.update_layout(template="plotly_dark", height=500, xaxis_title="Date", yaxis_title="Return (%)", hovermode="x unified", legend=dict(orientation="h", y=-0.2, x=0.5))
+                st.plotly_chart(fig_norm, use_container_width=True)
+                
+                # --- PLOT 2: RAW PRICE HISTORY ---
+                st.subheader("Price History (USD)")
+                fig_price = go.Figure()
+                for ticker in raw_data.columns:
+                    fig_price.add_trace(go.Scatter(
+                        x=raw_data.index, y=raw_data[ticker], mode='lines', name=ticker,
+                        hovertemplate=f'<b>{ticker}</b>: $%{{y:.2f}}<extra></extra>'
+                    ))
+                fig_price.update_layout(template="plotly_dark", height=500, xaxis_title="Date", yaxis_title="Price ($)", hovermode="x unified", legend=dict(orientation="h", y=-0.2, x=0.5))
+                st.plotly_chart(fig_price, use_container_width=True)
+                
+                # --- TECHNICAL SUMMARY ---
+                if tech_summary:
+                    st.divider()
+                    st.subheader("Technical Analysis Snapshot")
+                    st.dataframe(pd.DataFrame(tech_summary), use_container_width=True)
+
+                # --- NEW: FUNDAMENTAL COMPARISON TABLE ---
+                st.divider()
+                st.subheader("🏗️ Fundamental Comparison")
+                with st.spinner("Fetching fundamental data..."):
+                    fund_df = get_fundamental_comparison(final_tickers)
+                    if not fund_df.empty:
+                        st.dataframe(fund_df, use_container_width=True)
+                    else:
+                        st.warning("Could not retrieve fundamental data.")
+"""
+with compare_tab:
+    st.header("Compare Stock Performance")
+    c1, c2 = st.columns([2, 2])
+    with c1:
+        default_tickers = [t for t in st.session_state.portfolio_data["Ticker"].unique() if t]
         # Handle case where default_tickers might be empty or smaller than 3
         defaults = default_tickers[:3] if default_tickers else []
         selected_tickers = st.multiselect("Select portfolio stocks:", default_tickers, default=defaults)
@@ -966,7 +1072,7 @@ with compare_tab:
                     st.divider()
                     st.subheader("Technical Analysis Snapshot")
                     st.dataframe(pd.DataFrame(tech_summary), use_container_width=True)
-
+"""
 # --- TAB 4: DEEP DIVE ---
 with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
