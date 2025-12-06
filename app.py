@@ -914,11 +914,39 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                 # 3. Fundamental Analysis
                 display_fundamental_metrics(stock)
 
+                # # 4. Financial Statements
+                # st.subheader("📑 Financial Statements")
+                # income_stmt = stock.quarterly_income_stmt
+                # balance_sheet = stock.quarterly_balance_sheet
+                # cash_flow = stock.quarterly_cashflow
+
+                # tab_f1, tab_f2, tab_f3 = st.tabs(["Income Statement", "Balance Sheet", "Cash Flow"])
+                # with tab_f1:
+                #     if not income_stmt.empty: st.dataframe((income_stmt / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+                # with tab_f2:
+                #     if not balance_sheet.empty: st.dataframe((balance_sheet / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+                # with tab_f3:
+                #     if not cash_flow.empty: st.dataframe((cash_flow / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+
+                # if not income_stmt.empty and not cash_flow.empty:
+                #     st.subheader("📊 Key Financial Metrics")
+                #     fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
+                #     if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
+
                 # 4. Financial Statements
                 st.subheader("📑 Financial Statements")
                 income_stmt = stock.quarterly_income_stmt
                 balance_sheet = stock.quarterly_balance_sheet
                 cash_flow = stock.quarterly_cashflow
+
+                # --- FIX: Remove Time from Column Headers ---
+                # This converts the columns from Datetime objects to "YYYY-MM-DD" strings
+                for df in [income_stmt, balance_sheet, cash_flow]:
+                    if not df.empty:
+                        try:
+                            df.columns = df.columns.strftime('%Y-%m-%d')
+                        except AttributeError:
+                            pass # Columns might already be strings if cached
 
                 tab_f1, tab_f2, tab_f3 = st.tabs(["Income Statement", "Balance Sheet", "Cash Flow"])
                 with tab_f1:
@@ -927,11 +955,6 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                     if not balance_sheet.empty: st.dataframe((balance_sheet / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
                 with tab_f3:
                     if not cash_flow.empty: st.dataframe((cash_flow / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
-
-                if not income_stmt.empty and not cash_flow.empty:
-                    st.subheader("📊 Key Financial Metrics")
-                    fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
-                    if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
 
                 # 5. AI News Analysis
                 st.divider()
