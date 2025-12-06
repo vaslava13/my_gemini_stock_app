@@ -706,7 +706,7 @@ if 'portfolio_data' not in st.session_state:
     # 5. Save to session state
     st.session_state.portfolio_data = df
 
-st.title("💰 AI FINANCIAL APP")
+st.title("💰 AI Financial App")
 
 input_tab, compare_tab, deep_dive_tab = st.tabs([
     "✏️ Define & 📊 Optimize Portfolio ", 
