@@ -878,23 +878,22 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                 st.subheader("📉 Technical Analysis")
                 fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.03, 
                                     row_heights=[0.30, 0.10, 0.30, 0.30], 
-                                    subplot_titles=(f'{ticker_symbol} Price', 'RSI (14)', 'MACD'))
+                                    subplot_titles=(f'{ticker_symbol} Price','', 'RSI (14)', 'MACD'))
                 
                 # Main Price (Candlestick)
-                fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], 
-                                             low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
+                fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_50'], name='SMA 50', line=dict(color='cyan', width=1)), row=1, col=1)
                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_200'], name='SMA 200', line=dict(color='orange', width=1)), row=1, col=1)
                 
                 # RSI
-                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['RSI'], name='RSI', line=dict(color='purple', width=1.5)), row=2, col=1)
-                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['RSI'], name='RSI', line=dict(color='purple', width=1.5)), row=3, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
                 
                 # MACD
-                fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=3, col=1)
-                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD'], name='MACD', line=dict(color='blue', width=1)), row=3, col=1)
-                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD_Signal'], name='Signal', line=dict(color='orange', width=1)), row=3, col=1)
+                fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=4, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD'], name='MACD', line=dict(color='blue', width=1)), row=4, col=1)
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD_Signal'], name='Signal', line=dict(color='orange', width=1)), row=4, col=1)
                 
                 # UPDATE LAYOUT FOR INTERACTIVITY
                 fig.update_layout(
