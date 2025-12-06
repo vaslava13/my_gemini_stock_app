@@ -876,7 +876,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
 
                 # 2. Complex Technical Analysis Plot (UPDATED INTERACTIVITY)
                 st.subheader("📉 Technical Analysis")
-                fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, 
+                fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.03, 
                                     row_heights=[0.30, 0.10, 0.30, 0.30], 
                                     subplot_titles=(f'{ticker_symbol} Price', 'RSI (14)', 'MACD'))
                 
