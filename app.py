@@ -259,66 +259,84 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        # --- IMPROVED PLOTTING ---
-        # Set a clean style
-        plt.style.use('seaborn-v0_8-whitegrid') 
-        plt.rcParams.update({'font.family': 'sans-serif', 'font.size': 11})
-        
-        fig, ax = plt.subplots(figsize=(10, 7))
-        
-        # 1. Plot Frontiers (Grey for Old, Blue for New)
+        # --- IMPROVED PLOTTING (SWITCHED TO PLOTLY) ---
+        fig = go.Figure()
+
+        # 1. Plot Frontiers
+        # Baseline Frontier (Dashed, Lighter)
         if len(vol_b) > 0:
-            ax.plot(vol_b, ret_b, color="#b9e713", linestyle='--', linewidth=2, label='Baseline Frontier', alpha=0.6)
+            fig.add_trace(go.Scatter(
+                x=vol_b, y=ret_b, 
+                mode='lines', 
+                name='Baseline Frontier',
+                line=dict(color='#b9e713', width=2, dash='dash'),
+                opacity=0.6,
+                hovertemplate='<b>Base Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+            ))
+
+        # New Frontier (Solid, Bold)
         if len(vol_n) > 0:
-            ax.plot(vol_n, ret_n, color='#2980b9', linestyle='-', linewidth=3, label='New Frontier')
+            fig.add_trace(go.Scatter(
+                x=vol_n, y=ret_n, 
+                mode='lines', 
+                name='New Frontier',
+                line=dict(color='#2980b9', width=4),
+                hovertemplate='<b>New Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+            ))
 
-        # 2. Plot Current Positions with Annotation
-        # Baseline
-        ax.scatter(curr_std_b, curr_ret_b, marker='o', s=150, c="#bdf53b", edgecolors='black', label='Baseline Hold', zorder=5)
-        ax.annotate(" Base", (curr_std_b, curr_ret_b), xytext=(5, 0), textcoords='offset points', fontsize=10, color='#555')
-        
-        # New
-        ax.scatter(curr_std_n, curr_ret_n, marker='o', s=200, c="#0361a0", edgecolors='black', label='New Hold', zorder=6)
-        ax.annotate(" Current", (curr_std_n, curr_ret_n), xytext=(5, 0), textcoords='offset points', fontsize=10, fontweight='bold', color='#2980b9')
+        # 2. Plot Current Positions
+        # Baseline Marker
+        fig.add_trace(go.Scatter(
+            x=[curr_std_b], y=[curr_ret_b],
+            mode='markers+text',
+            name='Baseline Hold',
+            text=['Base'], textposition="bottom center",
+            marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black')),
+            hovertemplate='<b>Baseline Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+        ))
 
-        # 3. Plot Optimal Points (Distinct Colors)
-        # Low Risk (Green), Max Sharpe (Purple), High Return (Red)
+        # New Marker
+        fig.add_trace(go.Scatter(
+            x=[curr_std_n], y=[curr_ret_n],
+            mode='markers+text',
+            name='New Hold',
+            text=['Current'], textposition="top center",
+            marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white')),
+            hovertemplate='<b>New Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+        ))
+
+        # 3. Plot Optimal Points
         scenarios = [
-            ('low_risk', '#27ae60', 'Min Vol'), 
-            ('medium_risk', '#8e44ad', 'Max Sharpe'), 
-            ('high_risk', '#c0392b', 'High Ret')
+            ('low_risk', '#27ae60', 'Min Volatility', 'star'), 
+            ('medium_risk', '#8e44ad', 'Max Sharpe', 'star'), 
+            ('high_risk', '#c0392b', 'Max Return', 'star')
         ]
-        
-        for key, color, label in scenarios:
+
+        for key, color, label, symbol in scenarios:
             r, v, _ = portfolios[key]['performance']
-            ax.scatter(v, r, marker='*', s=250, c=color, edgecolors='white', linewidth=1, label=f"{label}", zorder=7)
+            fig.add_trace(go.Scatter(
+                x=[v], y=[r],
+                mode='markers',
+                name=label,
+                marker=dict(size=18, color=color, symbol=symbol, line=dict(width=1, color='white')),
+                hovertemplate=f'<b>{label}</b><br>Risk: %{{x:.1%}}<br>Return: %{{y:.1%}}<extra></extra>'
+            ))
 
-        # 4. Formatting
-        ax.set_title("Efficient Frontier Comparison", fontsize=16, fontweight='bold', pad=15, color='white')
-        ax.set_xlabel("Volatility (Risk)", fontsize=12, color='white')
-        ax.set_ylabel("Expected Return", fontsize=12, color='white')
-        
-        # Convert axes to percentages
-        ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-        ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
-        
-        # Clean Legend
-        #ax.legend(loc='best', frameon=True, framealpha=0.9, shadow=True, fancybox=True)
-
-        # 6. --- FIXED LEGEND CODE ---
-        ax.legend(
-            loc='upper center', 
-            bbox_to_anchor=(0.5, -0.15), 
-            fancybox=True, 
-            shadow=True, 
-            ncol=2, 
-            facecolor='#333333',   # Dark Grey Background
-            edgecolor='white',     # White Border
-            labelcolor='white',    # White Text
-            scatterpoints=1        # Shows 1 icon per label (Fixes missing/duplicate icons)
+        # 4. Layout Formatting
+        fig.update_layout(
+            title=dict(text="Efficient Frontier Comparison", font=dict(size=20)),
+            xaxis=dict(title="Volatility (Risk)", tickformat=".0%", showgrid=True, gridcolor='#444'),
+            yaxis=dict(title="Expected Return", tickformat=".0%", showgrid=True, gridcolor='#444'),
+            template="plotly_dark",
+            height=600,
+            legend=dict(
+                orientation="h", 
+                yanchor="bottom", y=-0.2, 
+                xanchor="center", x=0.5,
+                bgcolor="rgba(0,0,0,0)"
+            ),
+            hovermode="closest"
         )
-        
-        plt.tight_layout()
 
         return portfolios, val_b, val_n, latest_prices, fig
 

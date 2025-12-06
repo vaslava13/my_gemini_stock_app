@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
 from pypfopt import EfficientFrontier, risk_models, expected_returns
 from pypfopt.plotting import plot_efficient_frontier
+import matplotlib.ticker as mtick # Added for % formatting
+from pypfopt import CLA
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Portfolio Optimizer", layout="wide")
@@ -181,113 +183,229 @@ def make_chart_responsive(fig, height=400):
     )
     return fig
 
-def optimize_portfolio(tickers, current_holdings, start_date='2020-01-01', end_date=None):
-    """Fetches stock prices and calculates optimal portfolios."""
+def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01-01'):
     try:
-        with st.spinner("Downloading historical stock data..."):
-            df = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=True)
+        # 1. Combine tickers to fetch all data at once
+        base_tickers = list(baseline_holdings.keys())
+        new_tickers = list(new_holdings.keys()) if new_holdings else []
+        all_tickers = list(set(base_tickers + new_tickers))
+
+        with st.spinner("Calculating efficient frontiers..."):
+            df = yf.download(all_tickers, start=start_date, progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 try: df = df['Close']
                 except KeyError: df = df.xs('Close', level=0, axis=1)
 
-        if df.empty:
-            st.error("❌ No data downloaded.")
-            return None, None, None, None
-
-        df = df.dropna(axis=1, how='all').dropna() 
-        if df.shape[1] < 2:
-            st.error("⚠️ Need at least two valid stocks.")
-            return None, None, None, None
-
+        if df.empty or df.shape[1] < 2: return None, None, None, None, None
+        df = df.dropna(axis=1, how='all').dropna()
         latest_prices = df.iloc[-1]
-        valid_tickers_held = [t for t in tickers if t in current_holdings and t in latest_prices.index]
+
+        # --- BASELINE FRONTIER CALC ---
+        valid_base = [t for t in base_tickers if t in df.columns]
+        df_base = df[valid_base]
         
-        if not valid_tickers_held:
-            st.error("❌ None of your tickers were found.")
-            return None, None, None, None
+        mu_b = expected_returns.mean_historical_return(df_base)
+        S_b = risk_models.sample_cov(df_base)
+        
+        cla_b = CLA(mu_b, S_b)
+        try:
+            cla_b.min_volatility()
+            cla_b.max_sharpe()
+            ret_b, vol_b, _ = cla_b.efficient_frontier(points=50)
+        except:
+            ret_b, vol_b = [], []
 
-        total_portfolio_value = sum(current_holdings[ticker] * latest_prices[ticker] for ticker in valid_tickers_held)
-        current_weights = {ticker: (current_holdings[ticker] * latest_prices[ticker]) / total_portfolio_value for ticker in valid_tickers_held}
+        val_b = sum(baseline_holdings[t] * latest_prices[t] for t in valid_base)
+        w_b = pd.Series({t: (baseline_holdings[t] * latest_prices[t]) / val_b for t in valid_base}).reindex(valid_base, fill_value=0)
+        curr_ret_b = np.sum(mu_b * w_b)
+        curr_std_b = np.sqrt(np.dot(w_b.T, np.dot(S_b, w_b)))
 
-        mu = expected_returns.mean_historical_return(df)
-        S = risk_models.sample_cov(df)
+        # --- NEW PORTFOLIO FRONTIER CALC ---
+        valid_new = [t for t in new_tickers if t in df.columns]
+        df_new = df[valid_new]
+        
+        mu_n = expected_returns.mean_historical_return(df_new)
+        S_n = risk_models.sample_cov(df_new)
+        
+        cla_n = CLA(mu_n, S_n)
+        try:
+            cla_n.min_volatility()
+            cla_n.max_sharpe()
+            ret_n, vol_n, _ = cla_n.efficient_frontier(points=50)
+        except:
+            ret_n, vol_n = [], []
 
+        val_n = sum(new_holdings[t] * latest_prices[t] for t in valid_new)
+        w_n = pd.Series({t: (new_holdings[t] * latest_prices[t]) / val_n for t in valid_new}).reindex(valid_new, fill_value=0)
+        curr_ret_n = np.sum(mu_n * w_n)
+        curr_std_n = np.sqrt(np.dot(w_n.T, np.dot(S_n, w_n)))
+
+        # --- OPTIMIZATION STRATEGIES ---
         portfolios = {}
-        # 1. Low Risk
-        ef_low = EfficientFrontier(mu, S)
+        ef_low = EfficientFrontier(mu_n, S_n)
         ef_low.min_volatility()
         portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
-        # 2. Medium Risk
-        ef_med = EfficientFrontier(mu, S)
+        ef_med = EfficientFrontier(mu_n, S_n)
         ef_med.max_sharpe()
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
-        # 3. High Risk
-        min_ret, _, _ = portfolios['low_risk']['performance']
-        max_ret = mu.max()
-        target_return = min_ret + 0.8 * (max_ret - min_ret)
-        ef_high = EfficientFrontier(mu, S)
+        ef_high = EfficientFrontier(mu_n, S_n)
+        min_r = portfolios['low_risk']['performance'][0]
+        max_r = mu_n.max()
         try:
-            ef_high.efficient_return(target_return)
+            ef_high.efficient_return(min_r + 0.8 * (max_r - min_r))
             portfolios['high_risk'] = {'weights': ef_high.clean_weights(), 'performance': ef_high.portfolio_performance()}
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        current_weights_series = pd.Series(current_weights).reindex(df.columns, fill_value=0)
-        curr_ret = np.sum(mu * current_weights_series)
-        curr_std = np.sqrt(np.dot(current_weights_series.T, np.dot(S, current_weights_series)))
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        plot_efficient_frontier(EfficientFrontier(mu, S), ax=ax, show_assets=False)
+        # --- IMPROVED PLOTTING ---
+        # Set a clean style
+        plt.style.use('seaborn-v0_8-whitegrid') 
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.size': 11})
         
-        scenarios = [('low_risk', 'Lowest Risk', 'green', 'o'), ('medium_risk', 'Max Sharpe', 'blue', '*'), ('high_risk', 'High Risk', 'red', 'X')]
-        for key, label, color, marker in scenarios:
+        fig, ax = plt.subplots(figsize=(10, 7))
+        
+        # 1. Plot Frontiers (Grey for Old, Blue for New)
+        if len(vol_b) > 0:
+            ax.plot(vol_b, ret_b, color="#b9e713", linestyle='--', linewidth=2, label='Baseline Frontier', alpha=0.6)
+        if len(vol_n) > 0:
+            ax.plot(vol_n, ret_n, color='#2980b9', linestyle='-', linewidth=3, label='New Frontier')
+
+        # 2. Plot Current Positions with Annotation
+        # Baseline
+        ax.scatter(curr_std_b, curr_ret_b, marker='o', s=150, c="#bdf53b", edgecolors='black', label='Baseline Hold', zorder=5)
+        ax.annotate(" Base", (curr_std_b, curr_ret_b), xytext=(5, 0), textcoords='offset points', fontsize=10, color='#555')
+        
+        # New
+        ax.scatter(curr_std_n, curr_ret_n, marker='o', s=200, c="#0361a0", edgecolors='black', label='New Hold', zorder=6)
+        ax.annotate(" Current", (curr_std_n, curr_ret_n), xytext=(5, 0), textcoords='offset points', fontsize=10, fontweight='bold', color='#2980b9')
+
+        # 3. Plot Optimal Points (Distinct Colors)
+        # Low Risk (Green), Max Sharpe (Purple), High Return (Red)
+        scenarios = [
+            ('low_risk', '#27ae60', 'Min Vol'), 
+            ('medium_risk', '#8e44ad', 'Max Sharpe'), 
+            ('high_risk', '#c0392b', 'High Ret')
+        ]
+        
+        for key, color, label in scenarios:
             r, v, _ = portfolios[key]['performance']
-            ax.scatter(v, r, marker=marker, s=150, c=color, label=label, zorder=5)
-            
-        ax.scatter(curr_std, curr_ret, marker='D', s=150, c='yellow', edgecolors='black', label='Current Portfolio', zorder=5)
-        ax.set_title("Efficient Frontier")
-        ax.legend()
+            ax.scatter(v, r, marker='*', s=250, c=color, edgecolors='white', linewidth=1, label=f"{label}", zorder=7)
+
+        # 4. Formatting
+        ax.set_title("Efficient Frontier Comparison", fontsize=16, fontweight='bold', pad=15, color='white')
+        ax.set_xlabel("Volatility (Risk)", fontsize=12, color='white')
+        ax.set_ylabel("Expected Return", fontsize=12, color='white')
+        
+        # Convert axes to percentages
+        ax.xaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+        ax.yaxis.set_major_formatter(mtick.PercentFormatter(1.0))
+        
+        # Clean Legend
+        #ax.legend(loc='best', frameon=True, framealpha=0.9, shadow=True, fancybox=True)
+
+        # 6. --- FIXED LEGEND CODE ---
+        ax.legend(
+            loc='upper center', 
+            bbox_to_anchor=(0.5, -0.15), 
+            fancybox=True, 
+            shadow=True, 
+            ncol=2, 
+            facecolor='#333333',   # Dark Grey Background
+            edgecolor='white',     # White Border
+            labelcolor='white',    # White Text
+            scatterpoints=1        # Shows 1 icon per label (Fixes missing/duplicate icons)
+        )
+        
         plt.tight_layout()
 
-        return portfolios, total_portfolio_value, latest_prices, fig
+        return portfolios, val_b, val_n, latest_prices, fig
 
     except Exception as e:
-        st.error(f"An error occurred during optimization: {e}")
-        return None, None, None, None
+        st.error(f"Optimization Error: {e}")
+        return None, None, None, None, None
+
+# (Keep calculate_rebalancing_plan and display_portfolio_results exactly as they were)
 
 def calculate_rebalancing_plan(weights, latest_prices, current_holdings, total_value, expected_return):
-    rebal_data = []
-    for ticker in latest_prices.index:
-        optimal_weight = weights.get(ticker, 0)
-        current_shares = current_holdings.get(ticker, 0)
-        target_value = total_value * optimal_weight
-        current_price = latest_prices.get(ticker, 0)
-        if current_price > 0:
-            target_shares = target_value / current_price
-            shares_to_trade = target_shares - current_shares
-            price_target = current_price * (1 + expected_return)
-            if abs(shares_to_trade) > 0.01:
-                rebal_data.append({
-                    "Ticker": ticker, "Action": "Buy" if shares_to_trade > 0 else "Sell",
-                    "Shares to Trade": float(f"{abs(shares_to_trade):.2f}"), "Target Price (1Y)": float(f"{price_target:.2f}")
+    """
+    Calculates the TARGET portfolio structure:
+    Ticker, Target Share Count, and Total Position Value.
+    """
+    target_data = []
+    
+    # Sort weights to show largest holdings first
+    sorted_weights = sorted(weights.items(), key=lambda x: x[1], reverse=True)
+    
+    for ticker, weight in sorted_weights:
+        # Only include stocks with a significant allocation (>0.1%)
+        if weight > 0.001:
+            price = latest_prices.get(ticker, 0)
+            
+            if price > 0:
+                # Calculate Target Value for this stock based on optimal weight
+                position_value = total_value * weight
+                
+                # Calculate Number of Shares to own
+                target_shares = position_value / price
+                
+                target_data.append({
+                    "Ticker": ticker,
+                    "Shares": float(f"{target_shares:.2f}"),
+                    "Total Value": float(f"{position_value:.2f}")
                 })
-    return rebal_data
+                
+    return target_data
 
-def display_portfolio_results(tab, name, perf, weights, rebalancing_data):
+def display_portfolio_results(tab, name, perf, weights, rebal_data, total_value):
     with tab:
-        st.subheader(f"{name} Strategy")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Expected Return", f"{perf[0]*100:.2f}%")
-        c2.metric("Volatility (Risk)", f"{perf[1]*100:.2f}%")
-        c3.metric("Sharpe Ratio", f"{perf[2]:.2f}")
-        active_weights = {k: v*100 for k, v in weights.items() if v > 0.001}
-        st.bar_chart(pd.DataFrame.from_dict(active_weights, orient='index', columns=['Weight (%)']))
-        if rebalancing_data:
-            st.dataframe(pd.DataFrame(rebalancing_data), use_container_width=True)
-        else:
-            st.info("No significant rebalancing needed.")
+        st.subheader(f"{name}")
+        
+        # Updated to 4 Columns to include Total Value
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Return", f"{perf[0]*100:.1f}%")
+        c2.metric("Risk", f"{perf[1]*100:.1f}%")
+        c3.metric("Sharpe", f"{perf[2]:.2f}")
+        c4.metric("Total Value", f"${total_value:,.2f}")
+        
+        # --- PIE CHART (Standard, No Hole) ---
+        active_w = {k: v*100 for k, v in weights.items() if v > 0.001}
+        
+        fig = go.Figure(data=[go.Pie(
+            labels=list(active_w.keys()),
+            values=list(active_w.values()),
+            hole=0, # 0 = Full Pie
+            textinfo='label+percent',
+            hoverinfo='label+percent+value',
+            marker=dict(line=dict(color='#000000', width=2))
+        )])
+        
+        fig.update_layout(
+            title="Recommended Allocation",
+            height=400,
+            template="plotly_dark",
+            margin=dict(l=20, r=20, t=50, b=20),
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # --- SIMPLIFIED TABLE ---
+        if rebal_data:
+            st.markdown("##### Target Portfolio Structure")
+            st.dataframe(
+                pd.DataFrame(rebal_data), 
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Ticker": "Ticker",
+                    "Shares": st.column_config.NumberColumn("Shares", format="%.2f"),
+                    "Total Value": st.column_config.NumberColumn("Total Value", format="$%.2f")
+                }
+            )
+        else: 
+            st.info("No allocation data generated.")
 
 # --- HELPER FUNCTIONS (COMPARISON) ---
 def analyze_stock_comparison(tickers, period):
@@ -556,7 +674,7 @@ if 'portfolio_data' not in st.session_state:
     # 5. Save to session state
     st.session_state.portfolio_data = df
 
-st.title("💰 AI FINANCIAL TOOL & PORTFOLIO OPTIMIZER")
+st.title("💰 AI FINANCIAL APP")
 
 input_tab, compare_tab, deep_dive_tab = st.tabs([
     "✏️ Define & 📊 Optimize Portfolio ", 
@@ -564,114 +682,149 @@ input_tab, compare_tab, deep_dive_tab = st.tabs([
     "📊 Single Stock Deep Dive"
 ])
 
-# --- TAB 1: DASHBOARD (Merged Input + Results) ---
+# --- TAB 1: DASHBOARD (Comparison & Optimization) ---
 with input_tab:
-    st.markdown("### Enter your Portfolio")
     
-    # 1. Load current data
-    curr_df = st.session_state.portfolio_data.copy()
+    # Initialize Session States for both portfolios
+    if 'portfolio_data' not in st.session_state:
+        # Default Data
+        data = [{"Ticker": "AAPL", "Shares": 15}, {"Ticker": "MSFT", "Shares": 20}, {"Ticker": "GOOGL", "Shares": 30}]
+        st.session_state.portfolio_data = pd.DataFrame(data)
+    
+    if 'new_portfolio_data' not in st.session_state:
+        # Default New Portfolio (Copy of baseline initially)
+        st.session_state.new_portfolio_data = st.session_state.portfolio_data.copy()
 
-    # 2. Configure Editor
-    edited_df = st.data_editor(
-        curr_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="portfolio_editor", # Unique key to track state
-        column_config={
-            "Ticker": st.column_config.TextColumn("Ticker", required=True),
-            "Shares": st.column_config.NumberColumn("Shares", min_value=0, step=1, required=True),
-            "Price": st.column_config.NumberColumn("Price", format="$%.2f", disabled=True),
-            "Total Value": st.column_config.NumberColumn("Total Value", format="$%.2f", disabled=True),
-            "Weight": st.column_config.ProgressColumn("Weight", format="%.2f%%", min_value=0, max_value=100)
-        }
-    )
-
-    # 3. AUTO-UPDATE LOGIC
-    # Check if the data has changed from the previous state
-    if not edited_df.equals(st.session_state.portfolio_data):
-        
-        # A. Clean up inputs (remove empty rows, uppercase tickers)
-        edited_df = edited_df.dropna(subset=['Ticker'])
-        edited_df['Ticker'] = edited_df['Ticker'].astype(str).str.upper()
-        
-        # B. Detect rows that need price updates (New rows or rows with 0 price)
-        # We assume if Price is NaN or 0, it needs fetching
-        for index, row in edited_df.iterrows():
-            ticker = row['Ticker']
-            price = row.get('Price', 0.0)
+    # --- HELPER TO UPDATE PRICES ---
+    def update_prices_for_df(df):
+        """Updates prices and totals for a given dataframe."""
+        if not df.empty:
+            df['Ticker'] = df['Ticker'].astype(str).str.upper()
+            for index, row in df.iterrows():
+                t = row['Ticker']
+                p = row.get('Price', 0.0)
+                if t and (pd.isna(p) or p == 0):
+                    try:
+                        d = yf.download(t, period="1d", progress=False)
+                        if not d.empty: df.at[index, 'Price'] = float(d['Close'].iloc[-1])
+                    except: pass
             
-            # If valid ticker but no price, fetch it immediately
-            if ticker and (pd.isna(price) or price == 0):
-                try:
-                    with st.spinner(f"Fetching price for {ticker}..."):
-                        data = yf.download(ticker, period="1d", progress=False)
-                        if not data.empty:
-                            # Update the price in the dataframe
-                            new_price = data['Close'].iloc[-1]
-                            edited_df.at[index, 'Price'] = float(new_price)
-                        else:
-                            st.toast(f"⚠️ Could not find ticker: {ticker}", icon="⚠️")
-                except Exception:
-                    pass
+            df['Total Value'] = df['Shares'] * df['Price']
+            total = df['Total Value'].sum()
+            df['Weight'] = (df['Total Value'] / total * 100) if total > 0 else 0
+        return df, df['Total Value'].sum()
 
-        # C. Recalculate Totals & Weights
-        edited_df['Total Value'] = edited_df['Shares'] * edited_df['Price']
-        grand_total = edited_df['Total Value'].sum()
+    # --- LAYOUT: TWO COLUMNS ---
+    col1, col2 = st.columns(2)
+
+    # === LEFT: BASELINE PORTFOLIO ===
+    with col1:
+        st.markdown("### 1️⃣ Baseline Portfolio")
+        st.caption("Your current holdings.")
         
-        if grand_total > 0:
-            edited_df['Weight'] = (edited_df['Total Value'] / grand_total) * 100
-        else:
-            edited_df['Weight'] = 0.0
+        base_df = st.session_state.portfolio_data
+        base_df, base_total = update_prices_for_df(base_df)
+        st.metric("Baseline Value", f"${base_total:,.2f}")
+        
+        edited_base = st.data_editor(
+            base_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="base_editor",
+            column_config={
+                "Ticker": st.column_config.TextColumn(required=True),
+                "Shares": st.column_config.NumberColumn(min_value=0, step=1, required=True),
+                "Price": st.column_config.NumberColumn(format="$%.2f", disabled=True),
+                "Total Value": st.column_config.NumberColumn(format="$%.2f", disabled=True),
+                "Weight": st.column_config.ProgressColumn(format="%.2f%%", min_value=0, max_value=100)
+            }
+        )
+        
+        # Save state & Reset results if changed
+        if not edited_base.equals(st.session_state.portfolio_data):
+            st.session_state.portfolio_data = edited_base
+            st.session_state.results = None
+            st.rerun()
 
-        # D. Save & Rerun to show updated numbers
-        st.session_state.portfolio_data = edited_df
-        st.session_state.results = None # Reset analysis results since data changed
+    with col2:    
+        st.markdown("### 2️⃣ New Portfolio")
+        st.caption("Add stocks or change shares to compare.")
+        
+        new_df = st.session_state.new_portfolio_data
+        new_df, new_total = update_prices_for_df(new_df)
+        
+        # Show difference in value
+        delta_val = new_total - base_total
+        # NEW (This handles the arrow automatically)
+        st.metric("New Value", f"${new_total:,.2f}", delta=f"{delta_val:,.2f}")
+
+        edited_new = st.data_editor(
+            new_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="new_editor",
+            column_config={
+                "Ticker": st.column_config.TextColumn(required=True),
+                "Shares": st.column_config.NumberColumn(min_value=0, step=1, required=True),
+                "Price": st.column_config.NumberColumn(format="$%.2f", disabled=True),
+                "Total Value": st.column_config.NumberColumn(format="$%.2f", disabled=True),
+                "Weight": st.column_config.ProgressColumn(format="%.2f%%", min_value=0, max_value=100)
+            }
+        )
+
+        if not edited_new.equals(st.session_state.new_portfolio_data):
+            st.session_state.new_portfolio_data = edited_new
+            st.session_state.results = None
+            st.rerun()
+
+    # --- ACTIONS ---
+    st.divider()
+    
+    # Button to sync New with Baseline (Reset)
+    if st.button("🔄 Reset 'New' to match 'Baseline'"):
+        st.session_state.new_portfolio_data = st.session_state.portfolio_data.copy()
+        st.session_state.results = None
         st.rerun()
 
-    # Display Grand Total at top (calculated from the edited df)
-    total_val = edited_df['Total Value'].sum() if not edited_df.empty else 0
-    st.metric("Total Portfolio Value", f"${total_val:,.2f}")
-
-    # 4. Analyze Button
-    if st.button("🚀 Analyze Portfolio", type="primary", use_container_width=True):
-        if edited_df.empty: 
-            st.error("Add stocks first.")
+    if st.button("🚀 Compare & Optimize Both", type="primary", use_container_width=True):
+        if edited_base.empty:
+            st.error("Baseline is empty.")
         else:
-            # Prepare inputs for optimization
-            ts = [t for t in edited_df["Ticker"].tolist() if t]
-            hs = {row["Ticker"]: row["Shares"] for _, row in edited_df.iterrows() if row["Ticker"]}
+            # Prepare inputs
+            base_tickers = [t for t in edited_base["Ticker"].tolist() if t]
+            base_holdings = {row["Ticker"]: row["Shares"] for _, row in edited_base.iterrows() if row["Ticker"]}
             
-            res = optimize_portfolio(ts, hs)
+            new_tickers = [t for t in edited_new["Ticker"].tolist() if t]
+            new_holdings = {row["Ticker"]: row["Shares"] for _, row in edited_new.iterrows() if row["Ticker"]}
+
+            # Run Optimization on BOTH
+            res = optimize_portfolio(base_holdings, new_holdings)
+            
             if res[0]: 
                 st.session_state.results = res
-                st.success("Optimization Complete!")
+                st.success("Comparison Complete! Scroll down.")
             else: 
                 st.error("Optimization failed.")
 
-    # 5. Results Section
+    # --- RESULTS SECTION ---
     if 'results' in st.session_state and st.session_state.results is not None:
         st.divider()
         st.subheader("📊 Optimization Results")
+        #portfolios, total_val, prices, fig = st.session_state.results
+        portfolios, total_val, _, prices, fig = st.session_state.results
         
-        portfolios, total_val_opt, prices, fig = st.session_state.results
-        
-        # Display Old Style Matplotlib Chart (Square for Mobile)
-        st.pyplot(fig, use_container_width=True)
+        # Display Interactive Plotly Chart (Mobile Friendly)
+        st.plotly_chart(fig, use_container_width=True)
         
         t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
-        scenarios = [
-            (t1, 'low_risk', "Low Risk"), 
-            (t2, 'medium_risk', "Balanced"), 
-            (t3, 'high_risk', "High Risk")
-        ]
-        
+        scenarios = [(t1, 'low_risk', "Low Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
         for tab, key, name in scenarios:
             p = portfolios[key]
             plan = calculate_rebalancing_plan(p['weights'], prices, 
                 {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
-                total_val_opt, p['performance'][0])
-            display_portfolio_results(tab, name, p['performance'], p['weights'], plan)
-            
+                total_val, p['performance'][0])
+            display_portfolio_results(tab, name, p['performance'], p['weights'], plan, total_val)
+
 # --- TAB 3: COMPARISON ---
 with compare_tab:
     st.header("Compare Stock Performance")
