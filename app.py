@@ -615,7 +615,7 @@ def plot_price_history(hist_df, ticker_symbol):
             mode='lines',
             fill='tozeroy', # Fills area under line
             line=dict(color='#00d4ff', width=2),
-            hovertemplate='<b>Price</b>: $%{{y:.2f}}<extra></extra>'
+            hovertemplate='<b>Price</b>: $%{y:.2f}<extra></extra>'
         ))
 
         fig.update_layout(
