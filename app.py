@@ -1020,7 +1020,7 @@ with compare_tab:
                         x=norm_data.index, y=norm_data[ticker], mode='lines', name=ticker,
                         hovertemplate=f'<b>{ticker}</b>: %{{y:.2f}}%<extra></extra>'
                     ))
-                fig_norm.update_layout(template="plotly_dark", height=500, xaxis_title="Date", yaxis_title="Return (%)", hovermode="x unified", legend=dict(orientation="h", y=-0.2, x=0.3))
+                fig_norm.update_layout(template="plotly_dark", height=500, xaxis_title="Date", yaxis_title="Return (%)", hovermode="x unified", legend=dict(orientation="h", y=-0.2, x=0.4))
                 st.plotly_chart(fig_norm, use_container_width=True)
                 
                 # --- PLOT 2: RAW PRICE HISTORY ---
@@ -1031,7 +1031,7 @@ with compare_tab:
                         x=raw_data.index, y=raw_data[ticker], mode='lines', name=ticker,
                         hovertemplate=f'<b>{ticker}</b>: $%{{y:.2f}}<extra></extra>'
                     ))
-                fig_price.update_layout(template="plotly_dark", height=500, xaxis_title="Date", yaxis_title="Price ($)", hovermode="x unified", legend=dict(orientation="h", y=-0.2, x=0.3))
+                fig_price.update_layout(template="plotly_dark", height=500, xaxis_title="Date", yaxis_title="Price ($)", hovermode="x unified", legend=dict(orientation="h", y=-0.2, x=0.4))
                 st.plotly_chart(fig_price, use_container_width=True)
                 
                 # --- TECHNICAL SUMMARY ---
