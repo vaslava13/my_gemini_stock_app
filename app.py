@@ -998,81 +998,81 @@ with compare_tab:
                         st.dataframe(fund_df, use_container_width=True)
                     else:
                         st.warning("Could not retrieve fundamental data.")
-"""
-with compare_tab:
-    st.header("Compare Stock Performance")
-    c1, c2 = st.columns([2, 2])
-    with c1:
-        default_tickers = [t for t in st.session_state.portfolio_data["Ticker"].unique() if t]
-        # Handle case where default_tickers might be empty or smaller than 3
-        defaults = default_tickers[:3] if default_tickers else []
-        selected_tickers = st.multiselect("Select portfolio stocks:", default_tickers, default=defaults)
-        extra_tickers = st.text_input("Add other tickers (comma separated):")
-    with c2:
-        period = st.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
 
-    if st.button("🔎 Compare Stocks"):
-        final_tickers = list(set(selected_tickers + [t.strip().upper() for t in extra_tickers.split(",") if t.strip()]))
+# with compare_tab:
+#     st.header("Compare Stock Performance")
+#     c1, c2 = st.columns([2, 2])
+#     with c1:
+#         default_tickers = [t for t in st.session_state.portfolio_data["Ticker"].unique() if t]
+#         # Handle case where default_tickers might be empty or smaller than 3
+#         defaults = default_tickers[:3] if default_tickers else []
+#         selected_tickers = st.multiselect("Select portfolio stocks:", default_tickers, default=defaults)
+#         extra_tickers = st.text_input("Add other tickers (comma separated):")
+#     with c2:
+#         period = st.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y", "max"], index=3)
+
+#     if st.button("🔎 Compare Stocks"):
+#         final_tickers = list(set(selected_tickers + [t.strip().upper() for t in extra_tickers.split(",") if t.strip()]))
         
-        if not final_tickers:
-            st.error("Select at least one ticker.")
-        else:
-            # 1. Fetch Data
-            raw_data, norm_data, tech_summary = analyze_stock_comparison(final_tickers, period)
+#         if not final_tickers:
+#             st.error("Select at least one ticker.")
+#         else:
+#             # 1. Fetch Data
+#             raw_data, norm_data, tech_summary = analyze_stock_comparison(final_tickers, period)
             
-            if raw_data is not None:
-                # --- PLOT 1: NORMALIZED RETURNS (%) ---
-                st.subheader("Performance Chart (Normalized Returns)")
+#             if raw_data is not None:
+#                 # --- PLOT 1: NORMALIZED RETURNS (%) ---
+#                 st.subheader("Performance Chart (Normalized Returns)")
                 
-                fig_norm = go.Figure()
-                for ticker in norm_data.columns:
-                    fig_norm.add_trace(go.Scatter(
-                        x=norm_data.index, 
-                        y=norm_data[ticker],
-                        mode='lines',
-                        name=ticker,
-                        hovertemplate=f'<b>{ticker}</b>: %{{y:.2f}}%<extra></extra>'
-                    ))
+#                 fig_norm = go.Figure()
+#                 for ticker in norm_data.columns:
+#                     fig_norm.add_trace(go.Scatter(
+#                         x=norm_data.index, 
+#                         y=norm_data[ticker],
+#                         mode='lines',
+#                         name=ticker,
+#                         hovertemplate=f'<b>{ticker}</b>: %{{y:.2f}}%<extra></extra>'
+#                     ))
                 
-                fig_norm.update_layout(
-                    template="plotly_dark",
-                    height=500,
-                    xaxis_title="Date",
-                    yaxis_title="Return (%)",
-                    hovermode="x unified",
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
-                )
-                st.plotly_chart(fig_norm, use_container_width=True)
+#                 fig_norm.update_layout(
+#                     template="plotly_dark",
+#                     height=500,
+#                     xaxis_title="Date",
+#                     yaxis_title="Return (%)",
+#                     hovermode="x unified",
+#                     legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+#                 )
+#                 st.plotly_chart(fig_norm, use_container_width=True)
                 
-                # --- PLOT 2: RAW PRICE HISTORY ($) ---
-                st.subheader("Price History (USD)")
+#                 # --- PLOT 2: RAW PRICE HISTORY ($) ---
+#                 st.subheader("Price History (USD)")
                 
-                fig_price = go.Figure()
-                for ticker in raw_data.columns:
-                    fig_price.add_trace(go.Scatter(
-                        x=raw_data.index, 
-                        y=raw_data[ticker],
-                        mode='lines',
-                        name=ticker,
-                        hovertemplate=f'<b>{ticker}</b>: $%{{y:.2f}}<extra></extra>'
-                    ))
+#                 fig_price = go.Figure()
+#                 for ticker in raw_data.columns:
+#                     fig_price.add_trace(go.Scatter(
+#                         x=raw_data.index, 
+#                         y=raw_data[ticker],
+#                         mode='lines',
+#                         name=ticker,
+#                         hovertemplate=f'<b>{ticker}</b>: $%{{y:.2f}}<extra></extra>'
+#                     ))
                 
-                fig_price.update_layout(
-                    template="plotly_dark",
-                    height=500,
-                    xaxis_title="Date",
-                    yaxis_title="Stock Price ($)",
-                    hovermode="x unified",
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
-                )
-                st.plotly_chart(fig_price, use_container_width=True)
+#                 fig_price.update_layout(
+#                     template="plotly_dark",
+#                     height=500,
+#                     xaxis_title="Date",
+#                     yaxis_title="Stock Price ($)",
+#                     hovermode="x unified",
+#                     legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+#                 )
+#                 st.plotly_chart(fig_price, use_container_width=True)
                 
-                # --- TECHNICAL SUMMARY ---
-                if tech_summary:
-                    st.divider()
-                    st.subheader("Technical Analysis Snapshot")
-                    st.dataframe(pd.DataFrame(tech_summary), use_container_width=True)
-"""
+#                 # --- TECHNICAL SUMMARY ---
+#                 if tech_summary:
+#                     st.divider()
+#                     st.subheader("Technical Analysis Snapshot")
+#                     st.dataframe(pd.DataFrame(tech_summary), use_container_width=True)
+
 # --- TAB 4: DEEP DIVE ---
 with deep_dive_tab:
     st.header("🏢 Single Company Deep Dive")
