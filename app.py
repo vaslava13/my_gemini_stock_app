@@ -591,12 +591,55 @@ def get_fundamental_comparison(tickers):
     return df
 
 # --- NEW HELPER FUNCTIONS (DEEP DIVE) ---
+# def plot_price_history(hist_df, ticker_symbol):
+#     """Plots Price vs Time (Simple Line Chart)."""
+#     try:
+#         fig = go.Figure()
+#         fig.add_trace(go.Scatter(x=hist_df.index, y=hist_df['Close'], name='Stock Price', line=dict(color='cyan', width=2)))
+#         fig.update_layout(title_text=f"{ticker_symbol}: Price History", title_x=0.5, height=500, template="plotly_dark", hovermode="x unified", xaxis_title="Date", yaxis_title="Price ($)")
+#         return fig
+#     except Exception as e:
+#         st.warning(f"Could not plot price history: {e}")
+#         return None
+
 def plot_price_history(hist_df, ticker_symbol):
-    """Plots Price vs Time (Simple Line Chart)."""
+    """Plots Price vs Time with Range Slider and Selectors."""
     try:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=hist_df.index, y=hist_df['Close'], name='Stock Price', line=dict(color='cyan', width=2)))
-        fig.update_layout(title_text=f"{ticker_symbol}: Price History", title_x=0.5, height=500, template="plotly_dark", hovermode="x unified", xaxis_title="Date", yaxis_title="Price ($)")
+        
+        # Area Chart with Gradient
+        fig.add_trace(go.Scatter(
+            x=hist_df.index, 
+            y=hist_df['Close'], 
+            name='Close Price',
+            mode='lines',
+            fill='tozeroy', # Fills area under line
+            line=dict(color='#00d4ff', width=2),
+            hovertemplate='<b>Price</b>: $%{{y:.2f}}<extra></extra>'
+        ))
+
+        fig.update_layout(
+            title_text=f"{ticker_symbol}: Price History",
+            title_x=0.5,
+            height=500,
+            template="plotly_dark",
+            yaxis_title="Price ($)",
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=1, label="1m", step="month", stepmode="backward"),
+                        dict(count=6, label="6m", step="month", stepmode="backward"),
+                        dict(count=1, label="YTD", step="year", stepmode="todate"),
+                        dict(count=1, label="1y", step="year", stepmode="backward"),
+                        dict(step="all")
+                    ]),
+                    bgcolor="#333",
+                ),
+                rangeslider=dict(visible=True), # Adds the slider at bottom
+                type="date"
+            ),
+            hovermode="x unified"
+        )
         return fig
     except Exception as e:
         st.warning(f"Could not plot price history: {e}")
@@ -638,9 +681,35 @@ def display_fundamental_metrics(stock):
     except Exception as e:
         st.warning(f"Could not retrieve fundamental data: {e}")
 
+# def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
+#     """Plots key financial metrics."""
+#     try:
+#         income_stmt = income_stmt.iloc[:, :4].iloc[:, ::-1]
+#         cash_flow = cash_flow.iloc[:, :4].iloc[:, ::-1]
+#         dates = [d.strftime('%Y-%m-%d') for d in pd.to_datetime(income_stmt.columns)]
+
+#         revenue = income_stmt.loc['Total Revenue'] / 1e6 if 'Total Revenue' in income_stmt.index else pd.Series(0, index=dates)
+#         ebitda = income_stmt.loc['EBITDA'] / 1e6 if 'EBITDA' in income_stmt.index else pd.Series(0, index=dates)
+#         net_income = income_stmt.loc['Net Income'] / 1e6 if 'Net Income' in income_stmt.index else pd.Series(0, index=dates)
+#         fcf = cash_flow.loc['Free Cash Flow'] / 1e6 if 'Free Cash Flow' in cash_flow.index else pd.Series(0, index=dates)
+
+#         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=('Quarterly Income Metrics', 'Quarterly Free Cash Flow'))
+
+#         fig.add_trace(go.Bar(x=dates, y=revenue, name='Total Revenue', text=revenue.round(0), textposition='outside'), row=1, col=1)
+#         fig.add_trace(go.Bar(x=dates, y=ebitda, name='EBITDA', text=ebitda.round(0), textposition='outside'), row=1, col=1)
+#         fig.add_trace(go.Bar(x=dates, y=net_income, name='Net Income', text=net_income.round(0), textposition='outside'), row=1, col=1)
+#         fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', text=fcf.round(0), textposition='outside', marker_color='teal'), row=2, col=1)
+#         fig.add_hline(y=0, line_dash="dash", line_color="grey", row=2, col=1)
+
+#         fig.update_layout(title_text=f'Quarterly Financial Metrics for {ticker_symbol}', title_x=0.5, height=700, barmode='group', template='plotly_dark', hovermode='x unified')
+#         return fig
+#     except Exception:
+#         return None
+
 def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
-    """Plots key financial metrics."""
+    """Plots key financial metrics with improved interactivity."""
     try:
+        # Data Prep (Same as before)
         income_stmt = income_stmt.iloc[:, :4].iloc[:, ::-1]
         cash_flow = cash_flow.iloc[:, :4].iloc[:, ::-1]
         dates = [d.strftime('%Y-%m-%d') for d in pd.to_datetime(income_stmt.columns)]
@@ -650,18 +719,131 @@ def plot_financial_metrics(income_stmt, cash_flow, ticker_symbol):
         net_income = income_stmt.loc['Net Income'] / 1e6 if 'Net Income' in income_stmt.index else pd.Series(0, index=dates)
         fcf = cash_flow.loc['Free Cash Flow'] / 1e6 if 'Free Cash Flow' in cash_flow.index else pd.Series(0, index=dates)
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, subplot_titles=('Quarterly Income Metrics', 'Quarterly Free Cash Flow'))
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15, 
+                            subplot_titles=('Quarterly Income Metrics (Millions)', 'Quarterly Free Cash Flow (Millions)'))
 
-        fig.add_trace(go.Bar(x=dates, y=revenue, name='Total Revenue', text=revenue.round(0), textposition='outside'), row=1, col=1)
-        fig.add_trace(go.Bar(x=dates, y=ebitda, name='EBITDA', text=ebitda.round(0), textposition='outside'), row=1, col=1)
-        fig.add_trace(go.Bar(x=dates, y=net_income, name='Net Income', text=net_income.round(0), textposition='outside'), row=1, col=1)
-        fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', text=fcf.round(0), textposition='outside', marker_color='teal'), row=2, col=1)
+        # Add Traces with Custom Hover
+        fig.add_trace(go.Bar(x=dates, y=revenue, name='Revenue', marker_color='#3498db', hovertemplate='%{y:,.0f}M<extra></extra>'), row=1, col=1)
+        fig.add_trace(go.Bar(x=dates, y=ebitda, name='EBITDA', marker_color='#f1c40f', hovertemplate='%{y:,.0f}M<extra></extra>'), row=1, col=1)
+        fig.add_trace(go.Bar(x=dates, y=net_income, name='Net Income', marker_color='#2ecc71', hovertemplate='%{y:,.0f}M<extra></extra>'), row=1, col=1)
+        
+        fig.add_trace(go.Bar(x=dates, y=fcf, name='Free Cash Flow', marker_color='#1abc9c', hovertemplate='%{y:,.0f}M<extra></extra>'), row=2, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="grey", row=2, col=1)
 
-        fig.update_layout(title_text=f'Quarterly Financial Metrics for {ticker_symbol}', title_x=0.5, height=700, barmode='group', template='plotly_dark', hovermode='x unified')
+        fig.update_layout(
+            title_text=f'Quarterly Financial Metrics: {ticker_symbol}', 
+            title_x=0.5, 
+            height=700, 
+            barmode='group', 
+            template='plotly_dark', 
+            hovermode='x unified'
+        )
         return fig
     except Exception:
         return None
+
+# def analyze_single_stock_financials(ticker_symbol, period="2y"):
+#     """Downloads and displays deep-dive financials + Simple Price + Complex Technicals."""
+#     try:
+#         stock = yf.Ticker(ticker_symbol)
+        
+#         with st.spinner(f"Fetching deep dive data for {ticker_symbol}..."):
+#             data_period_map = {"3mo": "9mo", "6mo": "1y", "1y": "2y", "2y": "3y"}
+#             hist = stock.history(period=data_period_map.get(period, "2y"))
+            
+#             if hist.empty:
+#                 st.error(f"Could not download price history for '{ticker_symbol}'.")
+#                 return
+
+#             hist = calculate_technical_indicators(hist)
+#             if period == "3mo": hist_plot = hist.iloc[-63:]
+#             elif period == "6mo": hist_plot = hist.iloc[-126:]
+#             elif period == "1y": hist_plot = hist.iloc[-252:]
+#             else: hist_plot = hist.iloc[-504:]
+
+#             # --- CENTERING LOGIC ---
+#             spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
+            
+#             with content_col:
+#                 # 1. Simple Price Plot 
+#                 st.subheader("📈 Price History")
+#                 fig_price = plot_price_history(hist_plot, ticker_symbol)
+#                 if fig_price: st.plotly_chart(fig_price, use_container_width=True)
+
+#                 # 2. Complex Technical Analysis Plot
+#                 st.subheader("📉 Technical Analysis")
+#                 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD'))
+#                 fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
+#                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_50'], name='SMA 50', line=dict(color='cyan', width=1)), row=1, col=1)
+#                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_200'], name='SMA 200', line=dict(color='orange', width=1)), row=1, col=1)
+#                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
+#                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+#                 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+#                 fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=3, col=1)
+#                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD'], name='MACD', line=dict(color='blue', width=1)), row=3, col=1)
+#                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD_Signal'], name='Signal', line=dict(color='orange', width=1)), row=3, col=1)
+#                 fig.update_layout(title_text=f'Technical Indicators: {ticker_symbol}', title_x=0.5, height=900, template='plotly_dark', showlegend=False, xaxis_rangeslider_visible=False)
+#                 st.plotly_chart(fig, use_container_width=True)
+
+#                 # 3. Fundamental Analysis
+#                 display_fundamental_metrics(stock)
+
+#                 # 4. Financial Statements
+#                 st.subheader("📑 Financial Statements")
+#                 income_stmt = stock.quarterly_income_stmt
+#                 balance_sheet = stock.quarterly_balance_sheet
+#                 cash_flow = stock.quarterly_cashflow
+
+#                 tab_f1, tab_f2, tab_f3 = st.tabs(["Income Statement", "Balance Sheet", "Cash Flow"])
+#                 with tab_f1:
+#                     if not income_stmt.empty: st.dataframe((income_stmt / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+#                 with tab_f2:
+#                     if not balance_sheet.empty: st.dataframe((balance_sheet / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+#                 with tab_f3:
+#                     if not cash_flow.empty: st.dataframe((cash_flow / 1e6).round(2).style.format("{:,.2f} M"), use_container_width=True)
+
+#                 if not income_stmt.empty and not cash_flow.empty:
+#                     st.subheader("📊 Key Financial Metrics")
+#                     fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
+#                     if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
+
+#                 # 5. AI News Analysis (Aggregated)
+#                 st.divider()
+#                 st.subheader(f"📰 AI-Powered News Analysis: {ticker_symbol}")
+#                 st.caption("Aggregated news categories, sentiment, and summaries using Gemini 2.0.")
+                
+#                 with st.status("Fetching and analyzing news...", expanded=True) as status:
+#                     company_name = stock.info.get('shortName', ticker_symbol)
+#                     news_articles = fetch_news_from_api(ticker_symbol, company_name)
+                    
+#                     if news_articles:
+#                         status.write(f"✅ Found {len(news_articles)} articles. Analyzing with Gemini...")
+#                         analysis = get_gemini_analysis(ticker_symbol, news_articles)
+                        
+#                         if analysis and 'categories' in analysis:
+#                             status.update(label="Analysis Complete!", state="complete", expanded=False)
+                            
+#                             for cat in analysis['categories']:
+#                                 # Define color based on impact
+#                                 if cat['impact'] == "Positive": color = "green"
+#                                 elif cat['impact'] == "Negative": color = "red"
+#                                 else: color = "gray"
+                                
+#                                 with st.expander(f"{cat['name']} | :{color}[{cat['impact']}]"):
+#                                     st.markdown(f"**Summary:** {cat['main_message']}")
+#                                     st.markdown("---")
+#                                     st.markdown("**Sources:**")
+#                                     for art in cat.get('articles', []):
+#                                         st.markdown(f"- [{art['title']}]({art['url']})")
+#                         else:
+#                             status.update(label="AI Analysis Failed", state="error")
+#                             st.error("Could not generate analysis.")
+#                     else:
+#                         status.update(label="No News Found", state="error")
+#                         st.warning("No recent news articles found for this stock.")
+
+#     except Exception as e:
+#         st.error(f"An error occurred: {e}")
 
 def analyze_single_stock_financials(ticker_symbol, period="2y"):
     """Downloads and displays deep-dive financials + Simple Price + Complex Technicals."""
@@ -677,6 +859,7 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                 return
 
             hist = calculate_technical_indicators(hist)
+            # Filter for display based on user selection
             if period == "3mo": hist_plot = hist.iloc[-63:]
             elif period == "6mo": hist_plot = hist.iloc[-126:]
             elif period == "1y": hist_plot = hist.iloc[-252:]
@@ -686,24 +869,47 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
             spacer_left, content_col, spacer_right = st.columns([1, 6, 1])
             
             with content_col:
-                # 1. Simple Price Plot 
+                # 1. Simple Price Plot (Now Interactive)
                 st.subheader("📈 Price History")
                 fig_price = plot_price_history(hist_plot, ticker_symbol)
                 if fig_price: st.plotly_chart(fig_price, use_container_width=True)
 
-                # 2. Complex Technical Analysis Plot
+                # 2. Complex Technical Analysis Plot (UPDATED INTERACTIVITY)
                 st.subheader("📉 Technical Analysis")
-                fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2], subplot_titles=(f'{ticker_symbol} Price & SMA', 'RSI (14)', 'MACD'))
-                fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
+                fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, 
+                                    row_heights=[0.6, 0.2, 0.2], 
+                                    subplot_titles=(f'{ticker_symbol} Price', 'RSI (14)', 'MACD'))
+                
+                # Main Price (Candlestick)
+                fig.add_trace(go.Candlestick(x=hist_plot.index, open=hist_plot['Open'], high=hist_plot['High'], 
+                                             low=hist_plot['Low'], close=hist_plot['Close'], name='OHLC'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_50'], name='SMA 50', line=dict(color='cyan', width=1)), row=1, col=1)
                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['SMA_200'], name='SMA 200', line=dict(color='orange', width=1)), row=1, col=1)
-                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
+                
+                # RSI
+                fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['RSI'], name='RSI', line=dict(color='purple', width=1.5)), row=2, col=1)
                 fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
                 fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+                
+                # MACD
                 fig.add_trace(go.Bar(x=hist_plot.index, y=hist_plot['MACD_Hist'], name='MACD Hist', marker_color='gray'), row=3, col=1)
                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD'], name='MACD', line=dict(color='blue', width=1)), row=3, col=1)
                 fig.add_trace(go.Scatter(x=hist_plot.index, y=hist_plot['MACD_Signal'], name='Signal', line=dict(color='orange', width=1)), row=3, col=1)
-                fig.update_layout(title_text=f'Technical Indicators: {ticker_symbol}', title_x=0.5, height=900, template='plotly_dark', showlegend=False, xaxis_rangeslider_visible=False)
+                
+                # UPDATE LAYOUT FOR INTERACTIVITY
+                fig.update_layout(
+                    height=900, 
+                    template='plotly_dark', 
+                    showlegend=False, 
+                    hovermode="x unified",
+                    xaxis_rangeslider_visible=True, # Enable slider for zooming
+                    xaxis_rangeslider_thickness=0.05
+                )
+                
+                # Add crosshairs (Spikes)
+                fig.update_xaxes(showspikes=True, spikemode='across', spikesnap='cursor', showline=True, linewidth=1, linecolor='#444')
+                fig.update_yaxes(showspikes=True, spikemode='across', spikesnap='cursor', showline=True, linewidth=1, linecolor='#444')
+
                 st.plotly_chart(fig, use_container_width=True)
 
                 # 3. Fundamental Analysis
@@ -728,28 +934,27 @@ def analyze_single_stock_financials(ticker_symbol, period="2y"):
                     fig_metrics = plot_financial_metrics(income_stmt, cash_flow, ticker_symbol)
                     if fig_metrics: st.plotly_chart(fig_metrics, use_container_width=True)
 
-                # 5. AI News Analysis (Aggregated)
+                # 5. AI News Analysis
                 st.divider()
                 st.subheader(f"📰 AI-Powered News Analysis: {ticker_symbol}")
-                st.caption("Aggregated news categories, sentiment, and summaries using Gemini 2.0.")
+                # (Existing AI News Code remains unchanged...)
+                # ... [Code omitted for brevity as requested to not change other parts] ...
                 
+                # Note: Because we are replacing the whole function, we need to ensure the AI part runs.
+                # Re-inserting the AI block here to ensure the function is complete:
+                st.caption("Aggregated news categories, sentiment, and summaries using Gemini 2.0.")
                 with st.status("Fetching and analyzing news...", expanded=True) as status:
                     company_name = stock.info.get('shortName', ticker_symbol)
                     news_articles = fetch_news_from_api(ticker_symbol, company_name)
-                    
                     if news_articles:
                         status.write(f"✅ Found {len(news_articles)} articles. Analyzing with Gemini...")
                         analysis = get_gemini_analysis(ticker_symbol, news_articles)
-                        
                         if analysis and 'categories' in analysis:
                             status.update(label="Analysis Complete!", state="complete", expanded=False)
-                            
                             for cat in analysis['categories']:
-                                # Define color based on impact
                                 if cat['impact'] == "Positive": color = "green"
                                 elif cat['impact'] == "Negative": color = "red"
                                 else: color = "gray"
-                                
                                 with st.expander(f"{cat['name']} | :{color}[{cat['impact']}]"):
                                     st.markdown(f"**Summary:** {cat['main_message']}")
                                     st.markdown("---")
