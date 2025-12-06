@@ -493,51 +493,102 @@ def analyze_stock_comparison(tickers, period):
         return None, None, None
     
 def get_fundamental_comparison(tickers):
-    """Fetches key fundamentals (P/E, Market Cap, etc.) for a list of tickers."""
-    data = []
-    
-    # Use yf.Tickers to optimize slightly, though .info still requires individual calls usually
-    for symbol in tickers:
+    """
+    Fetches a specific list of financial metrics, transposes them (Rows=Metrics, Cols=Tickers),
+    and formats them as strings for easy reading.
+    """
+    # 1. Define the rows we want and their YFinance keys
+    # Structure: ("Display Name", "yfinance_key", "format_type")
+    metrics_map = [
+        ("--- Fiscal Year ---", None, "header"),
+        ("Fiscal Year Ends", "lastFiscalYearEnd", "date"),
+        ("Most Recent Quarter", "mostRecentQuarter", "date"),
+        
+        ("--- Profitability ---", None, "header"),
+        ("Profit Margin", "profitMargins", "pct"),
+        ("Operating Margin", "operatingMargins", "pct"),
+        
+        ("--- Management Effectiveness ---", None, "header"),
+        ("Return on Assets", "returnOnAssets", "pct"),
+        ("Return on Equity", "returnOnEquity", "pct"),
+        
+        ("--- Income Statement ---", None, "header"),
+        ("Revenue (ttm)", "totalRevenue", "big_num"),
+        ("Revenue Per Share", "revenuePerShare", "currency"),
+        ("Qtrly Revenue Growth", "revenueGrowth", "pct"),
+        ("Gross Profit", "grossProfits", "big_num"),
+        ("EBITDA", "ebitda", "big_num"),
+        ("Net Income (ttm)", "netIncomeToCommon", "big_num"),
+        ("Diluted EPS", "trailingEps", "currency"),
+        ("Qtrly Earnings Growth", "earningsGrowth", "pct"),
+        
+        ("--- Balance Sheet ---", None, "header"),
+        ("Total Cash", "totalCash", "big_num"),
+        ("Total Cash Per Share", "totalCashPerShare", "currency"),
+        ("Total Debt", "totalDebt", "big_num"),
+        ("Total Debt/Equity", "debtToEquity", "ratio_pct"), # YF returns 50 for 50% usually
+        ("Current Ratio", "currentRatio", "ratio"),
+        ("Book Value Per Share", "bookValue", "currency"),
+        
+        ("--- Cash Flow ---", None, "header"),
+        ("Operating Cash Flow", "operatingCashflow", "big_num"),
+        ("Levered FCF", "freeCashflow", "big_num") 
+    ]
+
+    combined_data = {}
+
+    for ticker in tickers:
         try:
-            stock = yf.Ticker(symbol)
+            stock = yf.Ticker(ticker)
             info = stock.info
+            col_data = {}
+
+            for label, key, fmt in metrics_map:
+                if fmt == "header":
+                    col_data[label] = ""
+                    continue
+                
+                val = info.get(key)
+                
+                # Formatting Logic
+                if val is None:
+                    formatted_val = "-"
+                elif fmt == "date":
+                    # YF sends timestamps
+                    formatted_val = datetime.fromtimestamp(val).strftime('%Y-%m-%d') if val else "-"
+                elif fmt == "pct":
+                    formatted_val = f"{val:.2%}"
+                elif fmt == "ratio_pct":
+                    formatted_val = f"{val:.2f}%" # DebtToEquity is often returned as a whole number (e.g. 11.42)
+                elif fmt == "big_num":
+                    if abs(val) >= 1e12: formatted_val = f"{val/1e12:.2f}T"
+                    elif abs(val) >= 1e9: formatted_val = f"{val/1e9:.2f}B"
+                    elif abs(val) >= 1e6: formatted_val = f"{val/1e6:.2f}M"
+                    else: formatted_val = f"{val:,.0f}"
+                elif fmt == "currency":
+                    formatted_val = f"${val:.2f}"
+                elif fmt == "ratio":
+                    formatted_val = f"{val:.2f}"
+                else:
+                    formatted_val = str(val)
+                
+                col_data[label] = formatted_val
             
-            data.append({
-                "Ticker": symbol,
-                "Market Cap": info.get("marketCap"),
-                "P/E (Trail)": info.get("trailingPE"),
-                "P/E (Fwd)": info.get("forwardPE"),
-                "PEG Ratio": info.get("pegRatio"),
-                "Price/Book": info.get("priceToBook"),
-                "ROE": info.get("returnOnEquity"),
-                "Div Yield": info.get("dividendYield"),
-                "Profit Margin": info.get("profitMargins")
-            })
+            combined_data[ticker] = col_data
+
         except Exception:
-            continue
-            
-    df = pd.DataFrame(data)
-    if df.empty: return pd.DataFrame()
+            combined_data[ticker] = {k[0]: "-" for k in metrics_map}
+
+    # Create DataFrame (Tickers as Columns)
+    df = pd.DataFrame(combined_data)
     
-    # --- FORMATTING ---
-    # 1. Market Cap (Trillions/Billions)
-    def fmt_cap(x):
-        if not x or pd.isna(x): return "-"
-        if x >= 1e12: return f"${x/1e12:.2f}T"
-        if x >= 1e9: return f"${x/1e9:.2f}B"
-        return f"${x/1e6:.2f}M"
-        
-    df["Market Cap"] = df["Market Cap"].apply(fmt_cap)
+    # Ensure the order of rows matches our metrics_map
+    ordered_index = [m[0] for m in metrics_map if m[2] != "header" or m[0] in df.index]
+    # Filter out pure headers if you don't want empty rows, or keep them for spacing
+    # Here we keep the rows to maintain the specific order requested
+    df = df.reindex([m[0] for m in metrics_map])
     
-    # 2. Percentages (ROE, Yield, Margins)
-    for col in ["ROE", "Div Yield", "Profit Margin"]:
-        df[col] = df[col].apply(lambda x: f"{x:.2f}%" if x and not pd.isna(x) else "-")
-        
-    # 3. Decimals (Ratios)
-    for col in ["P/E (Trail)", "P/E (Fwd)", "PEG Ratio", "Price/Book"]:
-         df[col] = df[col].apply(lambda x: f"{x:.2f}" if x and not pd.isna(x) else "-")
-         
-    return df.set_index("Ticker")
+    return df
 
 # --- NEW HELPER FUNCTIONS (DEEP DIVE) ---
 def plot_price_history(hist_df, ticker_symbol):
@@ -992,10 +1043,20 @@ with compare_tab:
                 # --- NEW: FUNDAMENTAL COMPARISON TABLE ---
                 st.divider()
                 st.subheader("🏗️ Fundamental Comparison")
+                st.caption("Metrics fetched from Yahoo Finance (TTM = Trailing Twelve Months, MRQ = Most Recent Quarter)")
+                
                 with st.spinner("Fetching fundamental data..."):
                     fund_df = get_fundamental_comparison(final_tickers)
+                    
                     if not fund_df.empty:
-                        st.dataframe(fund_df, use_container_width=True)
+                        # We use dataframe to display it. 
+                        # Since it contains mixed string types now (dates, $, %), 
+                        # we don't use column_config, just raw display.
+                        st.dataframe(
+                            fund_df, 
+                            use_container_width=True, 
+                            height=800 # Made taller to fit all the rows
+                        )
                     else:
                         st.warning("Could not retrieve fundamental data.")
 
