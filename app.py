@@ -934,7 +934,7 @@ with compare_tab:
                     xaxis_title="Date",
                     yaxis_title="Return (%)",
                     hovermode="x unified",
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5)
                 )
                 st.plotly_chart(fig_norm, use_container_width=True)
                 
@@ -957,7 +957,7 @@ with compare_tab:
                     xaxis_title="Date",
                     yaxis_title="Stock Price ($)",
                     hovermode="x unified",
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5)
                 )
                 st.plotly_chart(fig_price, use_container_width=True)
                 
