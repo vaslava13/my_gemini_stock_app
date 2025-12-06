@@ -269,21 +269,87 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         
         # 1. Plot Frontiers
         if len(vol_b) > 0:
-            fig.add_trace(go.Scatter(x=vol_b, y=ret_b, mode='lines', name='Baseline Frontier', line=dict(color='#b9e713', width=2, dash='dash'), opacity=0.6))
+            #1. Plot Frontiers
+            # Baseline Frontier (Dashed, Lighter)
+            fig.add_trace(go.Scatter(
+                x=vol_b, y=ret_b, 
+                mode='lines', 
+                name='Baseline Frontier',
+                line=dict(color='#b9e713', width=2, dash='dash'),
+                opacity=0.6,
+                hovertemplate='<b>Base Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+            ))
+            #fig.add_trace(go.Scatter(x=vol_b, y=ret_b, mode='lines', name='Baseline Frontier', line=dict(color='#b9e713', width=2, dash='dash'), opacity=0.6))
         if len(vol_n) > 0:
-            fig.add_trace(go.Scatter(x=vol_n, y=ret_n, mode='lines', name='New Frontier', line=dict(color='#2980b9', width=4)))
+            fig.add_trace(go.Scatter(
+                x=vol_n, y=ret_n, 
+                mode='lines', 
+                name='New Frontier',
+                line=dict(color='#2980b9', width=4),
+                hovertemplate='<b>New Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+            ))
+            #fig.add_trace(go.Scatter(x=vol_n, y=ret_n, mode='lines', name='New Frontier', line=dict(color='#2980b9', width=4)))
 
         # 2. Plot Current Positions
-        fig.add_trace(go.Scatter(x=[curr_std_b], y=[curr_ret_b], mode='markers+text', name='Baseline Hold', text=['Base'], textposition="bottom center", marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black'))))
-        fig.add_trace(go.Scatter(x=[curr_std_n], y=[curr_ret_n], mode='markers+text', name='New Hold', text=['Current'], textposition="top center", marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white'))))
+        # Baseline Marker
+        fig.add_trace(go.Scatter(
+            x=[curr_std_b], y=[curr_ret_b],
+            mode='markers+text',
+            name='Baseline Hold',
+            text=['Base'], textposition="bottom center",
+            marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black')),
+            hovertemplate='<b>Baseline Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+        ))
+
+        # New Marker
+        fig.add_trace(go.Scatter(
+            x=[curr_std_n], y=[curr_ret_n],
+            mode='markers+text',
+            name='New Hold',
+            text=['Current'], textposition="top center",
+            marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white')),
+            hovertemplate='<b>New Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+        ))
+        #fig.add_trace(go.Scatter(x=[curr_std_b], y=[curr_ret_b], mode='markers+text', name='Baseline Hold', text=['Base'], textposition="bottom center", marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black'))))
+        #fig.add_trace(go.Scatter(x=[curr_std_n], y=[curr_ret_n], mode='markers+text', name='New Hold', text=['Current'], textposition="top center", marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white'))))
 
         # 3. Plot Optimal Points
-        scenarios = [('low_risk', '#27ae60', 'Min Vol'), ('medium_risk', '#8e44ad', 'Max Sharpe'), ('high_risk', '#c0392b', 'High Ret')]
-        for key, color, label in scenarios:
-            r, v, _ = portfolios[key]['performance']
-            fig.add_trace(go.Scatter(x=[v], y=[r], mode='markers', name=label, marker=dict(size=18, color=color, symbol='star', line=dict(width=1, color='white'))))
+        scenarios = [
+            ('low_risk', '#27ae60', 'Min Volatility', 'star'), 
+            ('medium_risk', '#8e44ad', 'Max Sharpe', 'star'), 
+            ('high_risk', '#c0392b', 'Max Return', 'star')
+        ]
+        #scenarios = [('low_risk', '#27ae60', 'Min Vol'), ('medium_risk', '#8e44ad', 'Max Sharpe'), ('high_risk', '#c0392b', 'High Ret')]
 
-        fig.update_layout(title="Efficient Frontier Comparison", height=600, template="plotly_dark", legend=dict(orientation="h", y=-0.2, x=0.5))
+        for key, color, label, symbol in scenarios:
+            r, v, _ = portfolios[key]['performance']
+            fig.add_trace(go.Scatter(
+                x=[v], y=[r],
+                mode='markers',
+                name=label,
+                marker=dict(size=18, color=color, symbol=symbol, line=dict(width=1, color='white')),
+                hovertemplate=f'<b>{label}</b><br>Risk: %{{x:.1%}}<br>Return: %{{y:.1%}}<extra></extra>'
+            ))
+
+        #for key, color, label in scenarios:
+        #    r, v, _ = portfolios[key]['performance']
+        #    fig.add_trace(go.Scatter(x=[v], y=[r], mode='markers', name=label, marker=dict(size=18, color=color, symbol='star', line=dict(width=1, color='white'))))
+
+        fig.update_layout(
+            title=dict(text="Efficient Frontier Comparison", font=dict(size=20)),
+            xaxis=dict(title="Volatility (Risk)", tickformat=".0%", showgrid=True, gridcolor='#444'),
+            yaxis=dict(title="Expected Return", tickformat=".0%", showgrid=True, gridcolor='#444'),
+            template="plotly_dark",
+            height=600,
+            legend=dict(
+                orientation="h", 
+                yanchor="bottom", y=-0.2, 
+                xanchor="center", x=0.5,
+                bgcolor="rgba(0,0,0,0)"
+            ),
+            hovermode="closest"
+        )
+        #fig.update_layout(title="Efficient Frontier Comparison", height=600, template="plotly_dark", legend=dict(orientation="h", y=-0.2, x=0.5))
 
         # RETURN THE STATS TUPLES AS WELL
         return portfolios, val_b, val_n, latest_prices, fig, (curr_ret_b, curr_std_b, curr_sharpe_b), (curr_ret_n, curr_std_n, curr_sharpe_n)
