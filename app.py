@@ -658,7 +658,7 @@ def display_fundamental_metrics(stock):
         
         st.markdown("**Valuation**")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Market Cap", get_metric("marketCap", "{:,.0f}B")/1000000000)
+        c1.metric("Market Cap", get_metric("marketCap", "{:,.0f}B", 1e-9))
         c2.metric("Trailing P/E", get_metric("trailingPE"))
         c3.metric("Forward P/E", get_metric("forwardPE"))
         c4.metric("Price/Book", get_metric("priceToBook"))
