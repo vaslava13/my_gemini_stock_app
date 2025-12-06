@@ -658,7 +658,7 @@ def display_fundamental_metrics(stock):
         
         st.markdown("**Valuation**")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Market Cap", get_metric("marketCap", "{:,.0f}"))
+        c1.metric("Market Cap", get_metric("marketCap", "{:,.0f}B")/1000000000)
         c2.metric("Trailing P/E", get_metric("trailingPE"))
         c3.metric("Forward P/E", get_metric("forwardPE"))
         c4.metric("Price/Book", get_metric("priceToBook"))
@@ -672,7 +672,7 @@ def display_fundamental_metrics(stock):
 
         st.markdown("**Dividends & Targets**")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Dividend Yield", get_metric("dividendYield", "{:.2f}%", 100))
+        c1.metric("Dividend Yield", get_metric("dividendYield", "{:.2f}%"))
         c2.metric("52W High", get_metric("fiftyTwoWeekHigh"))
         c3.metric("52W Low", get_metric("fiftyTwoWeekLow"))
         c4.metric("Analyst Target", get_metric("targetMeanPrice"))
