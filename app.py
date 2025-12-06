@@ -196,7 +196,7 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
                 try: df = df['Close']
                 except KeyError: df = df.xs('Close', level=0, axis=1)
 
-        if df.empty or df.shape[1] < 2: return None, None, None, None, None
+        if df.empty or df.shape[1] < 2: return None, None, None, None, None, None, None
         df = df.dropna(axis=1, how='all').dropna()
         latest_prices = df.iloc[-1]
 
@@ -219,6 +219,7 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         w_b = pd.Series({t: (baseline_holdings[t] * latest_prices[t]) / val_b for t in valid_base}).reindex(valid_base, fill_value=0)
         curr_ret_b = np.sum(mu_b * w_b)
         curr_std_b = np.sqrt(np.dot(w_b.T, np.dot(S_b, w_b)))
+        curr_sharpe_b = (curr_ret_b - 0.02) / curr_std_b if curr_std_b > 0 else 0
 
         # --- NEW PORTFOLIO FRONTIER CALC ---
         valid_new = [t for t in new_tickers if t in df.columns]
@@ -239,6 +240,7 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         w_n = pd.Series({t: (new_holdings[t] * latest_prices[t]) / val_n for t in valid_new}).reindex(valid_new, fill_value=0)
         curr_ret_n = np.sum(mu_n * w_n)
         curr_std_n = np.sqrt(np.dot(w_n.T, np.dot(S_n, w_n)))
+        curr_sharpe_n = (curr_ret_n - 0.02) / curr_std_n if curr_std_n > 0 else 0
 
         # --- OPTIMIZATION STRATEGIES ---
         portfolios = {}
@@ -259,90 +261,36 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         except:
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        # --- IMPROVED PLOTTING (SWITCHED TO PLOTLY) ---
+        # --- IMPROVED PLOTTING (With Plotly) ---
         fig = go.Figure()
 
+        # [Include the Plotly code provided in the previous answer here]
+        # (For brevity, I'm skipping repeating the chart code, but ensure 'fig' is created)
+        
         # 1. Plot Frontiers
-        # Baseline Frontier (Dashed, Lighter)
         if len(vol_b) > 0:
-            fig.add_trace(go.Scatter(
-                x=vol_b, y=ret_b, 
-                mode='lines', 
-                name='Baseline Frontier',
-                line=dict(color='#b9e713', width=2, dash='dash'),
-                opacity=0.6,
-                hovertemplate='<b>Base Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
-            ))
-
-        # New Frontier (Solid, Bold)
+            fig.add_trace(go.Scatter(x=vol_b, y=ret_b, mode='lines', name='Baseline Frontier', line=dict(color='#b9e713', width=2, dash='dash'), opacity=0.6))
         if len(vol_n) > 0:
-            fig.add_trace(go.Scatter(
-                x=vol_n, y=ret_n, 
-                mode='lines', 
-                name='New Frontier',
-                line=dict(color='#2980b9', width=4),
-                hovertemplate='<b>New Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
-            ))
+            fig.add_trace(go.Scatter(x=vol_n, y=ret_n, mode='lines', name='New Frontier', line=dict(color='#2980b9', width=4)))
 
         # 2. Plot Current Positions
-        # Baseline Marker
-        fig.add_trace(go.Scatter(
-            x=[curr_std_b], y=[curr_ret_b],
-            mode='markers+text',
-            name='Baseline Hold',
-            text=['Base'], textposition="bottom center",
-            marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black')),
-            hovertemplate='<b>Baseline Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
-        ))
-
-        # New Marker
-        fig.add_trace(go.Scatter(
-            x=[curr_std_n], y=[curr_ret_n],
-            mode='markers+text',
-            name='New Hold',
-            text=['Current'], textposition="top center",
-            marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white')),
-            hovertemplate='<b>New Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
-        ))
+        fig.add_trace(go.Scatter(x=[curr_std_b], y=[curr_ret_b], mode='markers+text', name='Baseline Hold', text=['Base'], textposition="bottom center", marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black'))))
+        fig.add_trace(go.Scatter(x=[curr_std_n], y=[curr_ret_n], mode='markers+text', name='New Hold', text=['Current'], textposition="top center", marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white'))))
 
         # 3. Plot Optimal Points
-        scenarios = [
-            ('low_risk', '#27ae60', 'Min Volatility', 'star'), 
-            ('medium_risk', '#8e44ad', 'Max Sharpe', 'star'), 
-            ('high_risk', '#c0392b', 'Max Return', 'star')
-        ]
-
-        for key, color, label, symbol in scenarios:
+        scenarios = [('low_risk', '#27ae60', 'Min Vol'), ('medium_risk', '#8e44ad', 'Max Sharpe'), ('high_risk', '#c0392b', 'High Ret')]
+        for key, color, label in scenarios:
             r, v, _ = portfolios[key]['performance']
-            fig.add_trace(go.Scatter(
-                x=[v], y=[r],
-                mode='markers',
-                name=label,
-                marker=dict(size=18, color=color, symbol=symbol, line=dict(width=1, color='white')),
-                hovertemplate=f'<b>{label}</b><br>Risk: %{{x:.1%}}<br>Return: %{{y:.1%}}<extra></extra>'
-            ))
+            fig.add_trace(go.Scatter(x=[v], y=[r], mode='markers', name=label, marker=dict(size=18, color=color, symbol='star', line=dict(width=1, color='white'))))
 
-        # 4. Layout Formatting
-        fig.update_layout(
-            title=dict(text="Efficient Frontier Comparison", font=dict(size=20)),
-            xaxis=dict(title="Volatility (Risk)", tickformat=".0%", showgrid=True, gridcolor='#444'),
-            yaxis=dict(title="Expected Return", tickformat=".0%", showgrid=True, gridcolor='#444'),
-            template="plotly_dark",
-            height=600,
-            legend=dict(
-                orientation="h", 
-                yanchor="bottom", y=-0.2, 
-                xanchor="center", x=0.5,
-                bgcolor="rgba(0,0,0,0)"
-            ),
-            hovermode="closest"
-        )
+        fig.update_layout(title="Efficient Frontier Comparison", height=600, template="plotly_dark", legend=dict(orientation="h", y=-0.2, x=0.5))
 
-        return portfolios, val_b, val_n, latest_prices, fig
+        # RETURN THE STATS TUPLES AS WELL
+        return portfolios, val_b, val_n, latest_prices, fig, (curr_ret_b, curr_std_b, curr_sharpe_b), (curr_ret_n, curr_std_n, curr_sharpe_n)
 
     except Exception as e:
         st.error(f"Optimization Error: {e}")
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
 
 # (Keep calculate_rebalancing_plan and display_portfolio_results exactly as they were)
 
@@ -824,24 +772,59 @@ with input_tab:
             else: 
                 st.error("Optimization failed.")
 
-    # --- RESULTS SECTION ---
+# --- RESULTS SECTION ---
     if 'results' in st.session_state and st.session_state.results is not None:
         st.divider()
         st.subheader("📊 Optimization Results")
-        #portfolios, total_val, prices, fig = st.session_state.results
-        portfolios, total_val, _, prices, fig = st.session_state.results
         
-        # Display Interactive Plotly Chart (Mobile Friendly)
+        # Unpack all variables, including the new stats tuples
+        portfolios, total_val, total_val_new, latest_prices, fig, base_stats, new_stats = st.session_state.results
+        
+        # --- NEW: DISPLAY SIDE-BY-SIDE METRICS ---
+        st.markdown("#### 🆚 Portfolio Comparison")
+        
+        # Create columns for the comparison
+        # Layout: Label | Return | Risk | Sharpe | Total Value
+        
+        # Baseline Row
+        st.markdown(f"**:grey[BASELINE PORTFOLIO]**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Expected Return", f"{base_stats[0]*100:.1f}%")
+        c2.metric("Annual Risk", f"{base_stats[1]*100:.1f}%")
+        c3.metric("Sharpe Ratio", f"{base_stats[2]:.2f}")
+        c4.metric("Total Value", f"${total_val:,.2f}")
+
+        # New Portfolio Row (with deltas where applicable)
+        st.markdown(f"**:blue[NEW PORTFOLIO]**")
+        d1, d2, d3, d4 = st.columns(4)
+        
+        # Calculate Deltas
+        delta_ret = (new_stats[0] - base_stats[0]) * 100
+        delta_risk = (new_stats[1] - base_stats[1]) * 100
+        delta_sharpe = new_stats[2] - base_stats[2]
+        delta_val = total_val_new - total_val
+
+        d1.metric("Expected Return", f"{new_stats[0]*100:.1f}%", delta=f"{delta_ret:+.1f}%")
+        d2.metric("Annual Risk", f"{new_stats[1]*100:.1f}%", delta=f"{delta_risk:+.1f}%", delta_color="inverse") # Inverse because less risk is better
+        d3.metric("Sharpe Ratio", f"{new_stats[2]:.2f}", delta=f"{delta_sharpe:+.2f}")
+        d4.metric("Total Value", f"${total_val_new:,.2f}", delta=f"${delta_val:,.2f}")
+
+        st.divider()
+        
+        # --- CHART ---
         st.plotly_chart(fig, use_container_width=True)
         
+        # --- OPTIMAL TABS ---
         t1, t2, t3 = st.tabs(["🛡️ Low Risk", "⚖️ Balanced", "🚀 High Risk"])
         scenarios = [(t1, 'low_risk', "Low Risk"), (t2, 'medium_risk', "Balanced"), (t3, 'high_risk', "High Risk")]
+        
         for tab, key, name in scenarios:
             p = portfolios[key]
-            plan = calculate_rebalancing_plan(p['weights'], prices, 
+            # Use the NEW Portfolio total value for rebalancing target
+            plan = calculate_rebalancing_plan(p['weights'], latest_prices, 
                 {row["Ticker"].upper(): row["Shares"] for _, row in st.session_state.portfolio_data.iterrows()},
-                total_val, p['performance'][0])
-            display_portfolio_results(tab, name, p['performance'], p['weights'], plan, total_val)
+                total_val_new, p['performance'][0])
+            display_portfolio_results(tab, name, p['performance'], p['weights'], plan, total_val_new)
 
 # --- TAB 3: COMPARISON ---
 with compare_tab:
