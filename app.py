@@ -531,7 +531,7 @@ def get_fundamental_comparison(tickers):
     
     # 2. Percentages (ROE, Yield, Margins)
     for col in ["ROE", "Div Yield", "Profit Margin"]:
-        df[col] = df[col].apply(lambda x: f"{x*100:.2f}%" if x and not pd.isna(x) else "-")
+        df[col] = df[col].apply(lambda x: f"{x:.2f}%" if x and not pd.isna(x) else "-")
         
     # 3. Decimals (Ratios)
     for col in ["P/E (Trail)", "P/E (Fwd)", "PEG Ratio", "Price/Book"]:
