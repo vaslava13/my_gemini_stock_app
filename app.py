@@ -247,14 +247,6 @@ def make_chart_responsive(fig, height=400):
     )
     return fig
 
-import pandas as pd
-import numpy as np
-import yfinance as yf
-import plotly.graph_objects as go
-import streamlit as st
-from pypfopt import expected_returns, risk_models, CLA, EfficientFrontier
-from pypfopt import exceptions
-
 def get_frontier_coordinates(mu, S):
     """
     Robust helper function to calculate Efficient Frontier coordinates.
@@ -1608,3 +1600,4 @@ with deep_dive_tab:
     if st.button("📊 Analyze Company"):
 
         analyze_single_stock_financials(dd_ticker, dd_period)
+
