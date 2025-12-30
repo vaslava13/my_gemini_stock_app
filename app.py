@@ -247,21 +247,79 @@ def make_chart_responsive(fig, height=400):
     )
     return fig
 
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import plotly.graph_objects as go
+import streamlit as st
+from pypfopt import expected_returns, risk_models, CLA, EfficientFrontier
+from pypfopt import exceptions
+
+def get_frontier_coordinates(mu, S):
+    """
+    Robust helper function to calculate Efficient Frontier coordinates.
+    Tries CLA first (fast, analytic), falls back to numerical optimization if CLA fails.
+    """
+    try:
+        # 1. Try Critical Line Algorithm (Fastest/Standard)
+        cla = CLA(mu, S)
+        cla.min_volatility()
+        cla.max_sharpe()
+        ret, vol, _ = cla.efficient_frontier(points=50)
+        return ret, vol
+        
+    except Exception as e:
+        # 2. Fallback: Numerical Optimization (Slower but more robust)
+        # If CLA fails (e.g., singular matrix), we manually calculate points
+        try:
+            ef = EfficientFrontier(mu, S)
+            min_vol_ret = ef.min_volatility()['performance'][0]  # Get return of min vol
+            
+            ef = EfficientFrontier(mu, S)
+            max_ret = ef._max_return()['performance'][0] # Get max return possible
+            
+            # Generate 20 target returns between min_vol and max_ret
+            target_returns = np.linspace(min_vol_ret, max_ret * 0.99, 20)
+            vol_list = []
+            ret_list = []
+            
+            for target in target_returns:
+                ef_loop = EfficientFrontier(mu, S)
+                try:
+                    ef_loop.efficient_return(target_return=target)
+                    perf = ef_loop.portfolio_performance()
+                    vol_list.append(perf[1])
+                    ret_list.append(perf[0])
+                except:
+                    continue
+            return ret_list, vol_list
+        except:
+            return [], []
+
 def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01-01'):
     try:
-        # 1. Combine tickers to fetch all data at once
+        # 1. Combine tickers
         base_tickers = list(baseline_holdings.keys())
         new_tickers = list(new_holdings.keys()) if new_holdings else []
         all_tickers = list(set(base_tickers + new_tickers))
 
-        with st.spinner("Calculating efficient frontiers..."):
+        with st.spinner("Fetching data and calculating frontiers..."):
             df = yf.download(all_tickers, start=start_date, progress=False, auto_adjust=True)
+            
+            # Handle MultiIndex (New yfinance format)
             if isinstance(df.columns, pd.MultiIndex):
                 try: df = df['Close']
                 except KeyError: df = df.xs('Close', level=0, axis=1)
 
-        if df.empty or df.shape[1] < 2: return None, None, None, None, None, None, None
-        df = df.dropna(axis=1, how='all').dropna()
+        # 2. Data Cleaning (CRITICAL FIX)
+        # Instead of dropna(), which might kill all data if dates mismatch, 
+        # we fill forward then drop remaining NaNs.
+        df = df.ffill().dropna()
+
+        if df.empty or df.shape[1] < 2:
+            st.error("Not enough common data points between assets to plot frontier.")
+            return None, None, None, None, None, None, None
+        
         latest_prices = df.iloc[-1]
 
         # --- BASELINE FRONTIER CALC ---
@@ -269,16 +327,14 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         df_base = df[valid_base]
         
         mu_b = expected_returns.mean_historical_return(df_base)
+        # Fix non-positive semi-definite matrices (prevents many crashes)
         S_b = risk_models.sample_cov(df_base)
+        S_b = risk_models.fix_nonpositive_semidefinite(S_b)
         
-        cla_b = CLA(mu_b, S_b)
-        try:
-            cla_b.min_volatility()
-            cla_b.max_sharpe()
-            ret_b, vol_b, _ = cla_b.efficient_frontier(points=50)
-        except:
-            ret_b, vol_b = [], []
+        # Get Coordinates using the robust helper
+        ret_b, vol_b = get_frontier_coordinates(mu_b, S_b)
 
+        # Current Baseline Stats
         val_b = sum(baseline_holdings[t] * latest_prices[t] for t in valid_base)
         w_b = pd.Series({t: (baseline_holdings[t] * latest_prices[t]) / val_b for t in valid_base}).reindex(valid_base, fill_value=0)
         curr_ret_b = np.sum(mu_b * w_b)
@@ -291,91 +347,78 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
         
         mu_n = expected_returns.mean_historical_return(df_new)
         S_n = risk_models.sample_cov(df_new)
+        S_n = risk_models.fix_nonpositive_semidefinite(S_n) # Fix matrix
         
-        cla_n = CLA(mu_n, S_n)
-        try:
-            cla_n.min_volatility()
-            cla_n.max_sharpe()
-            ret_n, vol_n, _ = cla_n.efficient_frontier(points=50)
-        except:
-            ret_n, vol_n = [], []
+        # Get Coordinates using the robust helper
+        ret_n, vol_n = get_frontier_coordinates(mu_n, S_n)
 
+        # Current New Stats
         val_n = sum(new_holdings[t] * latest_prices[t] for t in valid_new)
         w_n = pd.Series({t: (new_holdings[t] * latest_prices[t]) / val_n for t in valid_new}).reindex(valid_new, fill_value=0)
         curr_ret_n = np.sum(mu_n * w_n)
         curr_std_n = np.sqrt(np.dot(w_n.T, np.dot(S_n, w_n)))
         curr_sharpe_n = (curr_ret_n - 0.02) / curr_std_n if curr_std_n > 0 else 0
 
-        # --- OPTIMIZATION STRATEGIES ---
+        # --- OPTIMIZATION STRATEGIES (New Portfolio) ---
         portfolios = {}
+        
+        # Low Risk
         ef_low = EfficientFrontier(mu_n, S_n)
         ef_low.min_volatility()
         portfolios['low_risk'] = {'weights': ef_low.clean_weights(), 'performance': ef_low.portfolio_performance()}
 
+        # Medium Risk (Max Sharpe)
         ef_med = EfficientFrontier(mu_n, S_n)
         ef_med.max_sharpe()
         portfolios['medium_risk'] = {'weights': ef_med.clean_weights(), 'performance': ef_med.portfolio_performance()}
 
+        # High Risk
         ef_high = EfficientFrontier(mu_n, S_n)
         min_r = portfolios['low_risk']['performance'][0]
         max_r = mu_n.max()
         try:
+            # Try to target 80% of max possible return
             ef_high.efficient_return(min_r + 0.8 * (max_r - min_r))
             portfolios['high_risk'] = {'weights': ef_high.clean_weights(), 'performance': ef_high.portfolio_performance()}
         except:
+            # Fallback to Max Sharpe if high return is mathematically impossible
             portfolios['high_risk'] = portfolios['medium_risk']
 
-        # --- IMPROVED PLOTTING (With Plotly) ---
+        # --- PLOTTING ---
         fig = go.Figure()
 
-        # [Include the Plotly code provided in the previous answer here]
-        # (For brevity, I'm skipping repeating the chart code, but ensure 'fig' is created)
-        
-        # 1. Plot Frontiers
+        # 1. Plot Frontiers (Using the data we safely calculated)
         if len(vol_b) > 0:
-            #1. Plot Frontiers
-            # Baseline Frontier (Dashed, Lighter)
             fig.add_trace(go.Scatter(
                 x=vol_b, y=ret_b, 
                 mode='lines', 
                 name='Baseline Frontier',
                 line=dict(color='#b9e713', width=2, dash='dash'),
-                opacity=0.6,
-                hovertemplate='<b>Base Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+                opacity=0.6
             ))
-            #fig.add_trace(go.Scatter(x=vol_b, y=ret_b, mode='lines', name='Baseline Frontier', line=dict(color='#b9e713', width=2, dash='dash'), opacity=0.6))
+        
         if len(vol_n) > 0:
             fig.add_trace(go.Scatter(
                 x=vol_n, y=ret_n, 
                 mode='lines', 
                 name='New Frontier',
-                line=dict(color='#2980b9', width=4),
-                hovertemplate='<b>New Frontier</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+                line=dict(color='#2980b9', width=4)
             ))
-            #fig.add_trace(go.Scatter(x=vol_n, y=ret_n, mode='lines', name='New Frontier', line=dict(color='#2980b9', width=4)))
 
         # 2. Plot Current Positions
-        # Baseline Marker
         fig.add_trace(go.Scatter(
             x=[curr_std_b], y=[curr_ret_b],
-            mode='markers+text',
-            name='Baseline Hold',
+            mode='markers+text', name='Baseline Hold',
             text=['Base'], textposition="bottom center",
-            marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black')),
-            hovertemplate='<b>Baseline Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+            marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black'))
         ))
 
-        # New Marker
         fig.add_trace(go.Scatter(
             x=[curr_std_n], y=[curr_ret_n],
-            mode='markers+text',
-            name='New Hold',
+            mode='markers+text', name='New Hold',
             text=['Current'], textposition="top center",
-            marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white')),
-            hovertemplate='<b>New Holdings</b><br>Risk: %{x:.1%}<br>Return: %{y:.1%}<extra></extra>'
+            marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white'))
         ))
-        #fig.add_trace(go.Scatter(x=[curr_std_b], y=[curr_ret_b], mode='markers+text', name='Baseline Hold', text=['Base'], textposition="bottom center", marker=dict(size=12, color='#bdf53b', line=dict(width=2, color='black'))))
-        #fig.add_trace(go.Scatter(x=[curr_std_n], y=[curr_ret_n], mode='markers+text', name='New Hold', text=['Current'], textposition="top center", marker=dict(size=15, color='#0361a0', line=dict(width=2, color='white'))))
 
         # 3. Plot Optimal Points
         scenarios = [
@@ -383,7 +426,6 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
             ('medium_risk', '#8e44ad', 'Max Sharpe', 'star'), 
             ('high_risk', '#c0392b', 'Max Return', 'star')
         ]
-        #scenarios = [('low_risk', '#27ae60', 'Min Vol'), ('medium_risk', '#8e44ad', 'Max Sharpe'), ('high_risk', '#c0392b', 'High Ret')]
 
         for key, color, label, symbol in scenarios:
             r, v, _ = portfolios[key]['performance']
@@ -391,13 +433,8 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
                 x=[v], y=[r],
                 mode='markers',
                 name=label,
-                marker=dict(size=18, color=color, symbol=symbol, line=dict(width=1, color='white')),
-                hovertemplate=f'<b>{label}</b><br>Risk: %{{x:.1%}}<br>Return: %{{y:.1%}}<extra></extra>'
+                marker=dict(size=18, color=color, symbol=symbol, line=dict(width=1, color='white'))
             ))
-
-        #for key, color, label in scenarios:
-        #    r, v, _ = portfolios[key]['performance']
-        #    fig.add_trace(go.Scatter(x=[v], y=[r], mode='markers', name=label, marker=dict(size=18, color=color, symbol='star', line=dict(width=1, color='white'))))
 
         fig.update_layout(
             title=dict(text="Efficient Frontier Comparison", font=dict(size=20)),
@@ -405,17 +442,9 @@ def optimize_portfolio(baseline_holdings, new_holdings=None, start_date='2020-01
             yaxis=dict(title="Expected Return", tickformat=".0%", showgrid=True, gridcolor='#444'),
             template="plotly_dark",
             height=600,
-            legend=dict(
-                orientation="h", 
-                yanchor="bottom", y=-0.2, 
-                xanchor="center", x=0.5,
-                bgcolor="rgba(0,0,0,0)"
-            ),
-            hovermode="closest"
+            legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center")
         )
-        #fig.update_layout(title="Efficient Frontier Comparison", height=600, template="plotly_dark", legend=dict(orientation="h", y=-0.2, x=0.5))
 
-        # RETURN THE STATS TUPLES AS WELL
         return portfolios, val_b, val_n, latest_prices, fig, (curr_ret_b, curr_std_b, curr_sharpe_b), (curr_ret_n, curr_std_n, curr_sharpe_n)
 
     except Exception as e:
@@ -1577,4 +1606,5 @@ with deep_dive_tab:
 
     st.write("") # Spacer
     if st.button("📊 Analyze Company"):
+
         analyze_single_stock_financials(dd_ticker, dd_period)
